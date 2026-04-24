@@ -13,19 +13,19 @@ University of Helsinki – Spring 2026
 
 Each team member should take responsibility for one or more of the following tasks:
 
-- **SDRF Maker**  ()
+- **SDRF Maker**  (Iiris)
 
   Responsible for creating and validating the `SDRF.tsv` file according to required standards.
 
-- **Software Runner**  ()
+- **Software Runner**  (Shabnaz)
 
   Handles running the assigned DIA analysis software and generating identification results.
 
-- **Repository Manager (Pulling Fork)** () 
+- **Repository Manager (Pulling Fork)** (Nika) 
 
   Manages the GitHub workflow, including pulling updates, maintaining the fork, and organizing files.
 
-- **Report Writer**  ()
+- **Report Writer**  (Jannika)
 
   Leads the documentation and writing of project reports, including methods, results, and interpretations.
 
