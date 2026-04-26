@@ -351,7 +351,7 @@ display: none;
 
 <h1 class="title toc-ignore">Introduction to PXDataset2 object</h1>
 <h4 class="author">Mohieddin Jafari</h4>
-<h4 class="date">2026-04-17 15:50:26</h4>
+<h4 class="date">2026-04-27 00:01:52</h4>
 
 </div>
 
@@ -361,32 +361,33 @@ display: none;
 <p>Bioconductor packages tagged by “proteomics”, n = 177 on Nov2024, n =
 188 on 8th Apr2026: <a href="https://bioconductor.org/packages/release/BiocViews.html#___Proteomics" class="uri">https://bioconductor.org/packages/release/BiocViews.html#___Proteomics</a></p>
 <pre class="r"><code>knitr::opts_chunk$set(echo = FALSE)
-## install.package(&quot;BiocManager&quot;)
+# install.package(&quot;BiocManager&quot;)
 
-# library(BiocManager)
-# 
-# # Bioconductor packages
-# if (!requireNamespace(&quot;BiocManager&quot;, quietly = TRUE))
-#     install.packages(&quot;BiocManager&quot;)
-# 
-# BiocManager::install(&quot;tidyverse&quot;)
-# BiocManager::install(&quot;factoextra&quot;)
-# BiocManager::install(&quot;msdata&quot;)
-# BiocManager::install(&quot;mzR&quot;)
-# BiocManager::install(&quot;rhdf5&quot;)
-# BiocManager::install(&quot;rpx&quot;)
-# BiocManager::install(&quot;MsCoreUtils&quot;)
-# BiocManager::install(&quot;QFeatures&quot;)
-# BiocManager::install(&quot;Spectra&quot;)
-# BiocManager::install(&quot;ProtGenerics&quot;)
-# BiocManager::install(&quot;PSMatch&quot;)
-# BiocManager::install(&quot;pheatmap&quot;)
-# BiocManager::install(&quot;limma&quot;)
-# BiocManager::install(&quot;MSnID&quot;)
-# BiocManager::install(&quot;rawrr&quot;)
-# BiocManager::install(&quot;RforMassSpectrometry/SpectraVis&quot;)
-# 
-# install.packages(&quot;tidyverse&quot;)</code></pre>
+library(BiocManager)
+
+# Bioconductor packages
+if (!requireNamespace(&quot;BiocManager&quot;, quietly = TRUE))
+    install.packages(&quot;BiocManager&quot;)
+
+BiocManager::install(&quot;tidyverse&quot;)
+BiocManager::install(&quot;factoextra&quot;)
+BiocManager::install(&quot;msdata&quot;)
+BiocManager::install(&quot;mzR&quot;)
+BiocManager::install(&quot;rhdf5&quot;)
+BiocManager::install(&quot;rpx&quot;)
+BiocManager::install(&quot;MsCoreUtils&quot;)
+BiocManager::install(&quot;QFeatures&quot;)
+BiocManager::install(&quot;Spectra&quot;)
+BiocManager::install(&quot;ProtGenerics&quot;)
+BiocManager::install(&quot;PSMatch&quot;)
+BiocManager::install(&quot;pheatmap&quot;)
+BiocManager::install(&quot;limma&quot;)
+BiocManager::install(&quot;MSnID&quot;)
+BiocManager::install(&quot;rawrr&quot;)
+BiocManager::install(&quot;remotes&quot;)
+BiocManager::install(&quot;RforMassSpectrometry/SpectraVis&quot;)
+
+install.packages(&quot;tidyverse&quot;)</code></pre>
 </div>
 <div id="review-some-points-about-ms-data" class="section level2">
 <h2>Review some points about MS data</h2>
@@ -507,44 +508,50 @@ dissemination across major proteomics repositories, the Consortium
 promotes open data policies in proteomics.</p>
 <p><code>proteomexchange.org</code></p>
 <pre class="r"><code>#Direct accessing data
-library(rpx)
-library(tidyr)
-px &lt;- PXDataset(&quot;PXD022816&quot;)
-pxget(px, grep(&quot;mzID&quot;, pxfiles(px))[1:3]) # It might take time for the local access  
-pxget(px, grep(&quot;mzML&quot;, pxfiles(px))[1:3]) # It might take time for the local access 
+library(rpx) # Access to proteomics datasets from ProteomeXchange
+library(tidyr) # Tools to help to create tidy data
 
-(px &lt;- PXDataset(&quot;PXD000001&quot;))
+px &lt;- PXDataset(&quot;PXD022816&quot;) # To store and access information about ProteomeXchange (PX) data sets
+pxget(px, grep(&quot;mzID&quot;, pxfiles(px))[1:3]) # It might take time for the local access
+# pxfiles lists all the files in the dataset, grep finds filenames containing &quot;mzID&quot; (peptide/protein identification files) [1:3] = only takes first three matches, pxget actually downloads those files.
+
+pxget(px, grep(&quot;mzML&quot;, pxfiles(px))[1:3]) # It might take time for the local access
+# Same as previosly, mzML files store the MS data
+
+(px &lt;- PXDataset(&quot;PXD000001&quot;)) # To remove any dataset from cache use:unlink(px@cachepath, recursive = TRUE) 
+# PXDataset just creates a reference to the dataset, doesn&#39;t actually download anything. Refers to one dataset at a time so overwrites the previous PXDataset
+
 (pxfiles(px)) # file names of the object
 
-fn &lt;- &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML&quot;
-mzf &lt;- pxget(px, fn)
+fn &lt;- &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML&quot; # Store the filename as a variable
+mzf &lt;- pxget(px, fn) # Downloads that specific file and saves it into mzf
 
 pxtax(px) # taxonomic name
 pxref(px) # bibliography ref
 
 
 
-pxget(px, &quot;erwinia_carotovora.fasta&quot;)
+pxget(px, &quot;erwinia_carotovora.fasta&quot;) # Downloads the FASTA file
 pxget(px, &quot;README.txt&quot;) # a vector defining the files to be found, try to find it on your device.
 # Some files are accessible remotely and some of them from local cashing mechanism.
-pxfiles(px) %&gt;% str() # To check 
+pxfiles(px) %&gt;% str() # To check which files are remote and which local
 
-(f &lt;- pxget(px, &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML&quot;))
-basename(f)</code></pre>
+(f &lt;- pxget(px, &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML&quot;)) # Another way to download the file? Stores path in f. Easy way to check where the data saved locally is
+basename(f) # Extracts just the file name?</code></pre>
 </div>
 <div id="ms-example-data-msdata" class="section level2">
 <h2>MS example data: msdata</h2>
 <pre class="r"><code># Various Mass Spectrometry raw data example files for proteomics and metabolomics
-library(msdata) 
-proteomics()</code></pre>
+library(msdata) # Loads the msdata package, it has a collection of small example MS datasets
+proteomics() # Lists proteomics example files</code></pre>
 <pre><code>## [1] &quot;MRM-standmix-5.mzML.gz&quot;                                                
 ## [2] &quot;MS3TMT10_01022016_32917-33481.mzML.gz&quot;                                 
 ## [3] &quot;MS3TMT11.mzML&quot;                                                         
 ## [4] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML.gz&quot;
 ## [5] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01.mzML.gz&quot;</code></pre>
-<pre class="r"><code>ident()</code></pre>
+<pre class="r"><code>ident() # Lists identification result files</code></pre>
 <pre><code>## [1] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzid&quot;</code></pre>
-<pre class="r"><code>quant()</code></pre>
+<pre class="r"><code>quant() # Lists quantification data files</code></pre>
 <pre><code>## [1] &quot;cptac_a_b_peptides.txt&quot;</code></pre>
 <div id="quiz-1-ga_4" class="section level3">
 <h3>Quiz 1 (GA_4)</h3>
