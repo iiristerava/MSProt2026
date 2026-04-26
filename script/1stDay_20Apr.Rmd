@@ -12,32 +12,33 @@ https://bioconductor.org/packages/release/BiocViews.html#___Proteomics
 
 ```{r setup, include=TRUE, echo=TRUE, eval=FALSE, message=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-## install.package("BiocManager")
+# install.package("BiocManager")
 
-# library(BiocManager)
-# 
-# # Bioconductor packages
-# if (!requireNamespace("BiocManager", quietly = TRUE))
-#     install.packages("BiocManager")
-# 
-# BiocManager::install("tidyverse")
-# BiocManager::install("factoextra")
-# BiocManager::install("msdata")
-# BiocManager::install("mzR")
-# BiocManager::install("rhdf5")
-# BiocManager::install("rpx")
-# BiocManager::install("MsCoreUtils")
-# BiocManager::install("QFeatures")
-# BiocManager::install("Spectra")
-# BiocManager::install("ProtGenerics")
-# BiocManager::install("PSMatch")
-# BiocManager::install("pheatmap")
-# BiocManager::install("limma")
-# BiocManager::install("MSnID")
-# BiocManager::install("rawrr")
-# BiocManager::install("RforMassSpectrometry/SpectraVis")
-# 
-# install.packages("tidyverse")
+library(BiocManager)
+
+# Bioconductor packages
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("tidyverse")
+BiocManager::install("factoextra")
+BiocManager::install("msdata")
+BiocManager::install("mzR")
+BiocManager::install("rhdf5")
+BiocManager::install("rpx")
+BiocManager::install("MsCoreUtils")
+BiocManager::install("QFeatures")
+BiocManager::install("Spectra")
+BiocManager::install("ProtGenerics")
+BiocManager::install("PSMatch")
+BiocManager::install("pheatmap")
+BiocManager::install("limma")
+BiocManager::install("MSnID")
+BiocManager::install("rawrr")
+BiocManager::install("remotes")
+BiocManager::install("RforMassSpectrometry/SpectraVis")
+
+install.packages("tidyverse")
 ```
 
 ## Review some points about MS data
@@ -97,40 +98,46 @@ Get to know the ProteomeXchange Consortium: Established to create globally coord
 
 ```{r, message=T, eval=FALSE}
 #Direct accessing data
-library(rpx)
-library(tidyr)
-px <- PXDataset("PXD022816")
-pxget(px, grep("mzID", pxfiles(px))[1:3]) # It might take time for the local access  
-pxget(px, grep("mzML", pxfiles(px))[1:3]) # It might take time for the local access 
+library(rpx) # Access to proteomics datasets from ProteomeXchange
+library(tidyr) # Tools to help to create tidy data
+
+px <- PXDataset("PXD022816") # To store and access information about ProteomeXchange (PX) data sets
+pxget(px, grep("mzID", pxfiles(px))[1:3]) # It might take time for the local access
+# pxfiles lists all the files in the dataset, grep finds filenames containing "mzID" (peptide/protein identification files) [1:3] = only takes first three matches, pxget actually downloads those files.
+
+pxget(px, grep("mzML", pxfiles(px))[1:3]) # It might take time for the local access
+# Same as previosly, mzML files store the MS data
 
 (px <- PXDataset("PXD000001")) # To remove any dataset from cache use:unlink(px@cachepath, recursive = TRUE) 
+# PXDataset just creates a reference to the dataset, doesn't actually download anything. Refers to one dataset at a time so overwrites the previous PXDataset
+
 (pxfiles(px)) # file names of the object
 
-fn <- "TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML"
-mzf <- pxget(px, fn)
+fn <- "TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML" # Store the filename as a variable
+mzf <- pxget(px, fn) # Downloads that specific file and saves it into mzf
 
 pxtax(px) # taxonomic name
 pxref(px) # bibliography ref
 
 
 
-pxget(px, "erwinia_carotovora.fasta")
+pxget(px, "erwinia_carotovora.fasta") # Downloads the FASTA file
 pxget(px, "README.txt") # a vector defining the files to be found, try to find it on your device.
 # Some files are accessible remotely and some of them from local cashing mechanism.
-pxfiles(px) %>% str() # To check 
+pxfiles(px) %>% str() # To check which files are remote and which local
 
-(f <- pxget(px, "TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML"))
-basename(f)
+(f <- pxget(px, "TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML")) # Another way to download the file? Stores path in f. Easy way to check where the data saved locally is
+basename(f) # Extracts just the file name?
 
 ```
 
 ## MS example data: msdata
 ```{r}
 # Various Mass Spectrometry raw data example files for proteomics and metabolomics
-library(msdata) 
-proteomics()
-ident()
-quant()
+library(msdata) # Loads the msdata package, it has a collection of small example MS datasets
+proteomics() # Lists proteomics example files
+ident() # Lists identification result files
+quant() # Lists quantification data files
 ```
 ### Quiz 1 (GA_4)
 Visit `gosocrative.com` and enter room name `FIN2026`
