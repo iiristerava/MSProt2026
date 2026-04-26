@@ -9,25 +9,30 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 
 ## Library
 ```{r, message=FALSE, warning=FALSE}
-# if (!require("BiocManager", quietly = TRUE))
-#     install.packages("BiocManager")
-# 
-# BiocManager::install("PSMatch")
-# if (!requireNamespace("remotes", quietly = TRUE))
-#     install.packages("remotes")
-# 
-# remotes::install_github("RforMassSpectrometry/SpectraVis")
 
-# library(rpx)
-# library(msdata)
-# library(rpx)
-# library(Spectra)
-# library(tidyverse)
-# library(cleaver)
-# library(MSnbase)
-# library(SpectraVis)
-# library(mzR)
-# library(PSMatch)
+# Installations done already!
+
+#if (!require("BiocManager", quietly = TRUE))
+  #install.packages("BiocManager")
+
+#BiocManager::install("PSMatch")
+#if (!requireNamespace("remotes", quietly = TRUE))
+    #install.packages("remotes")
+
+#remotes::install_github("RforMassSpectrometry/SpectraVis")
+
+#BiocManager::install("cleaver") # library(cleaver) did not work, tried this and it worked
+
+library(rpx)
+library(msdata)
+library(rpx)
+library(Spectra)
+library(tidyverse)
+library(cleaver)
+library(MSnbase)
+library(SpectraVis)
+library(mzR)
+library(PSMatch)
 ```
 
 # Toy spectra
