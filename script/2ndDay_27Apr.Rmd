@@ -31,7 +31,7 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 ```
 
 # Toy spectra
-```{r}
+```{r, warning=FALSE, message=FALSE}
 library(S4Vectors)
 library(Spectra)
 ## Let’s create a DataFrame containing MS levels, retention time, m/z and intensities for 2 spectra
@@ -64,7 +64,7 @@ peaksData(sp)[[2]]
 sp[c(1 ,2, 1, 1)]
 ```
 
-## Create this table from f
+## Create the Spectra object from f
 
 ```{r}
 library(rpx)
@@ -185,8 +185,8 @@ ms_fields %>%
 
 ```{r}
 #Two ways for a purpose
-head(msLevel(sp), 300)
-#head(sp$msLevel, 300)
+head(msLevel(sp), 250)
+#head(sp$msLevel, 250)
 
 msLevel(sp)[[1234]]
 plot(pd[[1234]], type = "h"); grid()
@@ -221,8 +221,6 @@ plotSpectra(sp[1]); grid()
 plotSpectra(sp[1:4])
 
 ```
-### Quiz 2 (GA_5)
-Visit `gosocrative.com` and enter room name `FIN2026`
 
 ## Visulaize the spectra
 ```{r}
@@ -235,7 +233,7 @@ plot(rtime(sp), tic(sp), type = "l"); grid()
 (sp1 <- filterMsLevel(sp, 1L))
 plot(rtime(sp1), tic(sp1), type = "l"); grid(); abline(v = rtime(sp)[2807], col = "red")
 
-MsCoreUtils::formatRt(rtime(sp)[2800:2820]) # Min:Sec
+MsCoreUtils::formatRt(rtime(sp)[2800:2820]) # Convert to Min:Sec format
 
 sp[2807]
 
@@ -252,9 +250,11 @@ spectraData(sp) |>
     geom_line()
 ```
 
+### Quiz 2 (GA_5)
+Visit `gosocrative.com` and enter room name `FIN2026`
 
 ```{r}
-# The filterPrecursorScan() function can be used to retain a set  parent (MS1) and children scans (MS2),
+# The filterPrecursorScan() function can be used to retain a set parent (MS1) and children scans (MS2),
 # as defined by an acquisition number, Use it to extract the MS1 scan of interest and all its MS2 children.
 
 (sp2 <- filterPrecursorScan(sp, 2807)) # a family of scans
@@ -288,6 +288,7 @@ table(msLevel(sp), centroided(sp))
 
 # Spectra::filter... family functions
 ```
+
 ## More Visulization
 ```{r}
 plotSpectra(sp2[7],
@@ -325,6 +326,17 @@ plotSpectraMirror(sp2[31], sp2[37]); grid()
 plotSpectraOverlay(sp2[i], col = c("red", "steelblue")); grid()
 
 ```
+
+```{r, include=TRUE,  eval=FALSE}
+# BiocManager::install("RforMassSpectrometry/SpectraVis")
+library(SpectraVis)
+
+plotlySpectra(sp2[37])
+
+browseSpectra(sp)
+
+```
+
 ```{r, include=FALSE, echo=FALSE, eval=FALSE}
 ####################################################
 library(mzR)
@@ -357,7 +369,7 @@ When a peptide is fragmented in MS/MS, it breaks along the backbone, producing i
 | y-ions   | C-terminal fragments  | C → N      |
 | z-ions   | C-terminal (ETD-type) | C → N      |
 
-### Intuition
+#### Intuition
 
 * **b / y ions** → most common (CID/HCD)
 * **c / z ions** → ETD/ECD fragmentation
@@ -406,16 +418,16 @@ Examples:
 
 ---
 
-## Fragmentation Methods in proteomics
+### Fragmentation Methods in proteomics
 
-### CID (Collision-Induced Dissociation)
+#### CID (Collision-Induced Dissociation)
 
 * Peptides collide with gas molecules
 * Slow heating fragmentation
 
 ---
 
-### HCD (Higher-energy C-trap Dissociation)
+#### HCD (Higher-energy C-trap Dissociation)
 
 * Higher-energy version of CID
 
@@ -423,7 +435,7 @@ Examples:
 
 ---
 
-### ETD (Electron Transfer Dissociation)
+#### ETD (Electron Transfer Dissociation)
 
 * Electron transfer to peptide
 
@@ -431,13 +443,13 @@ Examples:
 
 ---
 
-### ECD (Electron Capture Dissociation)
+#### ECD (Electron Capture Dissociation)
 
 * Similar to ETD (used in FTICR instruments)
 
 ---
 
-### Hybrid Methods (EThcD)
+#### Hybrid Methods (EThcD)
 
 * Combination of ETD and HCD
 
