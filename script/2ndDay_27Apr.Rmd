@@ -263,7 +263,7 @@ precScanNum(sp2)
 # Plot the MS1 spectrum of interest and highlight all the peaks that will be selected for MS2 analysis
 # plotSpectra()
 
-plotSpectra(sp2[1], xlim = c(400, 1000)); grid(); abline(v = precursorMz(sp2)[-1], col = "blue")
+plotSpectra(sp2[1], xlim = c(400, 500)); grid(); abline(v = precursorMz(sp2)[-1], col = "blue")
 
 # Use plotSpectra() function to plot all 10 MS2 spectra in one call.
 plotSpectra(sp2[-1])
