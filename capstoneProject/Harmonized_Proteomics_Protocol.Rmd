@@ -1,0 +1,158 @@
+---
+title: "Harmonized Proteomics Analysis Protocol"
+author: "Protocol for OpenMS, DIA-NN, MaxQuant, and Spectronaut"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+  pdf_document:
+    toc: true
+---
+
+# Overview
+
+This protocol describes a **harmonized analysis workflow** for running **OpenMS, DIA-NN, MaxQuant, and Spectronaut** on the same proteomics dataset while keeping **core parameters as consistent as possible**.\
+The goal is to minimize configuration-induced bias so that observed differences primarily reflect algorithmic design.
+
+> **Important note:** Exact equivalence between tools is not possible due to 
+fundamentally different scoring, inference, and machine-learning strategies. 
+This protocol defines *core parameters* that are conceptually shared.
+
+------------------------------------------------------------------------
+
+# Experimental Assumptions
+
+-   Same raw MS files are used across all tools
+-   Same FASTA file for database search (Please download it before 4th May vie 
+this link https://filesender.funet.fi/?s=download&token=f8310a8c-2fa0-472a-8adc-5231917c058c)
+-   Same acquisition strategy (DIA)
+-   Same biological samples and replicates
+-   Same level of comparison (primarily **peptide-level**)
+
+------------------------------------------------------------------------
+
+# Core Parameters
+
+## 1. Input Data and Global Settings
+
+| Parameter            | Harmonized Value      | Notes                         |
+|----------------------|-----------------------|-------------------------------|
+| Raw files            | Same vendor RAW files | No mixing of file versions    |
+| Centroiding          | Vendor centroiding    | Avoid profile/centroid mixing |
+| Acquisition type     | DIA                   | Must be identical             |
+| Instrument model     | Orbitrap Astral       | Conceptual matching           |
+| Internal calibration | Enabled               | In all tools                  |
+
+------------------------------------------------------------------------
+
+## 2. Database and Digestion
+
+| Parameter          | Harmonized Value     |
+|--------------------|----------------------|
+| FASTA database     | Identical FASTA file |
+| Contaminants       | Same contaminant set |
+| Decoy strategy     | Reverse target–decoy |
+| Enzyme             | Trypsin/P            |
+| Missed cleavages   | 2                    |
+| Enzyme specificity | Fully tryptic        |
+| Min peptide length | 7 amino acids        |
+| Max peptide length | 30–40 amino acids    |
+
+------------------------------------------------------------------------
+
+## 3. Modifications
+
+| Parameter                   | Harmonized Value                    |
+|-----------------------------|-------------------------------------|
+| Fixed modifications         | Carbamidomethyl (C)                 |
+| Variable modifications      | Oxidation (M), Acetylation (N-term) |
+| Protein N-term acetylation  | Enabled                             |
+| Max variable mods / peptide | 5                                   |
+| Open modification search    | Disabled                            |
+
+------------------------------------------------------------------------
+
+## 4. Mass Accuracy and Identification
+
+| Parameter | Harmonized Value | Rationale |
+|-------------------|---------------------------------|---------------------|
+| Precursor tolerance | Orbitrap-appropriate (≈10–20 ppm) | Conceptual equivalence |
+| Fragment tolerance | Orbitrap-appropriate (≈20–30 ppm) | Do not force identical numbers |
+| MS1 recalibration | Enabled | Improve mass accuracy |
+| MS2 recalibration | Enabled | Improve scoring |
+| Identification scoring | Tool-specific | Defaults retained |
+
+------------------------------------------------------------------------
+
+## 5. FDR Control and Quantification
+
+| Parameter            | Harmonized Value        |
+|----------------------|-------------------------|
+| PSM FDR              | 1%                      |
+| Peptide FDR          | 1%                      |
+| Protein FDR          | 1%                      |
+| Quantification level | MS2-based               |
+| Match-between-runs   | On or Off (same choice) |
+| Normalization        | Global / median-based   |
+
+> **Recommendation:** Primary comparisons should be performed at the **peptide level**. Protein-level results should be treated as secondary due to differing inference models.
+
+------------------------------------------------------------------------
+
+# DIA-Specific Settings (If Applicable)
+
+| Parameter         | Harmonized Value                             |
+|-------------------|----------------------------------------------|
+| Analysis mode     | Library-free (library prediction from FASTA) |
+| Spectral library  | Same library file if used                    |
+| iRT peptides      | Same iRT set (if used)                       |
+| Isolation windows | Same DIA scheme                              |
+
+Do **not** mix library-free and library-based modes across tools in a single comparison.
+
+------------------------------------------------------------------------
+
+# Tool-Specific Execution Notes
+
+## OpenMS
+
+-   Use equivalent digestion and modification settings
+-   Enable internal calibration
+-   Export peptide-level results for downstream harmonization
+
+## DIA-NN
+
+-   Use identical FASTA and digestion rules
+-   Disable extra PTMs and heuristic expansions
+-   Keep default neural-network scoring
+
+## MaxQuant
+
+-   Use Andromeda defaults except where harmonized
+-   Disable extra variable modifications
+-   Carefully document match-between-runs setting
+
+## Spectronaut
+
+-   Use DirectDIA for library-free analysis if applicable
+-   Align digestion, modifications, and FDR thresholds
+
+------------------------------------------------------------------------
+
+# Post-processing and Reporting
+
+1.  Export **peptide-level tables** from all tools
+2.  Apply identical filtering criteria
+3.  Optionally re-aggregate to protein level externally
+4.  Report overlap, sensitivity, and quantitative precision
+
+------------------------------------------------------------------------
+
+# Limitations
+
+-   Machine-learning models differ substantially across tools
+-   Protein inference strategies are not equivalent
+-   Interference correction and scoring models cannot be harmonized
+
+These limitations should be explicitly acknowledged in comparative studies.
