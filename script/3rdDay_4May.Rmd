@@ -4,29 +4,29 @@ author: "Mohieddin Jafari"
 date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
 output: html_document
 ---
-
+ 
+ 
 ### Quiz 1 (IA_5)
 
 Visit `gosocrative.com` and enter room name `FIN2026`
 
 ## Library
 ```{r, eval=FALSE}
-library(rpx)
-library(msdata)
-library(rpx)
-library(Spectra)
-library(tidyverse)
-library(cleaver)
-library(MSnbase)
-library(SpectraVis)
-library(tidyverse)
-library(mzR)
-library(PSMatch)
-library(pheatmap)
-library(QFeatures)
-library(sageR)
-library(SummarizedExperiment)
-library(factoextra)
+# library(rpx)
+# library(msdata)
+# library(rpx)
+# library(Spectra)
+# library(tidyverse)
+# library(cleaver)
+# library(MSnbase)
+# library(tidyverse)
+# library(mzR)
+# library(PSMatch)
+# library(pheatmap)
+# library(QFeatures)
+# library(sageR)
+# library(SummarizedExperiment)
+# library(factoextra)
 ```
 
 ## Preprocessing
@@ -133,7 +133,7 @@ table(is.na(filterMsLevel(spid, 2L)$sequence)) # Some of MS2 level can match to 
 ## Visualise MS2 scans
 
 ```{r, eval=FALSE}
-
+library(PSMatch)
 plotSpectra(spid[1234]); grid()
 
 # What is the exceptional spectra with high score and well annotated when you consider b and y ions
@@ -141,9 +141,65 @@ i <- which(spid$MS.GF.RawScore > 100)[1]
 plotSpectra(spid[i]); grid()
 
 spid[i]$sequence
-calculateFragments("THSQEEMQHMQR")
+PSMatch::calculateFragments("THSQEEMQHMQR")
 mz(spid[i])[[1]]
+```
 
+```{r}
+addFragments <- function(spectrum, tolerance = 0.01) {
+  seq <- spectrum$sequence
+  
+  if (is.null(seq) || is.na(seq)) {
+    stop("Spectrum does not contain a valid peptide sequence")
+  }
+  
+  # Theoretical fragments
+  frag <- PSMatch::calculateFragments(seq)
+  
+  # --- Handle fragment format ---
+  if (is.data.frame(frag)) {
+    mz_vals <- frag$mz
+    ion_labels <- frag$ion
+  } else if (is.matrix(frag)) {
+    mz_vals <- frag[, "mz"]
+    ion_labels <- rownames(frag)
+  } else if (is.atomic(frag)) {
+    mz_vals <- as.numeric(frag)
+    ion_labels <- names(frag)
+  } else {
+    stop("Unknown fragment format")
+  }
+  
+  # Observed peaks
+  peaks <- peaksData(spectrum)[[1]]
+  
+  # --- Handle peak format ---
+  if (is.data.frame(peaks)) {
+    peak_mz <- peaks$mz
+  } else if (is.matrix(peaks)) {
+    peak_mz <- peaks[, 1]   # usually first column is m/z
+  } else if (is.atomic(peaks)) {
+    peak_mz <- as.numeric(peaks)
+  } else {
+    stop("Unknown peak format")
+  }
+  
+  # --- Match peaks to fragments ---
+  labels <- sapply(peak_mz, function(mz_val) {
+    idx <- which.min(abs(mz_vals - mz_val))
+    
+    if (abs(mz_vals[idx] - mz_val) < tolerance) {
+      ion_labels[idx]
+    } else {
+      NA
+    }
+  })
+  
+  return(labels)
+}
+```
+
+```{r, eval=FALSE}
 (pdi <- data.frame(peaksData(spid[i])[[1]]))
 pdi$label <- addFragments(spid[i])
 pdi
@@ -204,16 +260,18 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 
 ## Quantitative proteomics
 
-|     | Label-free         | Labelled              |
-|-----|--------------------|-----------------------|
-| MS1 | XIC (Decimal)      | SILAC, 15N (Decimal)  |
-| MS2 | Counting (integer) | TMT (iTRAQ) (Decimal) |
+|     | Label-free                                                | Labelled              |
+|-----|-----------------------------------------------------------|-----------------------|
+| MS1 | XIC (Decimal)                                             | SILAC, 15N (Decimal)  |
+| MS2 | Counting in DDA (integer) / Fragment XIC in DIA (Decimal) | TMT (iTRAQ) (Decimal) |
 
 All quantification in Omics technology is relative quantitative not absolute.
 
 -   Counting: How many PSMs for each protein
 -   XIC (Extracted Ion Chromatogram): Intensity of each specific peptide (m/z, precursor) over time (e.g., MaxQuant, XCMS)
 -   Labelled TMT benefit: Good to remove technical variability since it would be shared
+
+
 ![TMT](fig_script/TMT.png)
 
 ### Quantitative assay
@@ -231,9 +289,12 @@ SummarizedExperiment object
 
 -   quantitative data: assay()
 -   samples/columns annotation: colData()
--   features/rows annotation: rowData() Multiple SummarizedExperiment (PSM, peptides, proteins, ...) are combined into a QFeatures object.
+-   features/rows annotation: rowData() 
+
+Multiple SummarizedExperiment (PSM, peptides, proteins, ...) are combined into a QFeatures object.
 
 Second level is aggregating low-level QF into higher level QF data. We can start with QF file and after quantification, you find an interesting protein and you see only one peptide was used to identify that protein and then only one PSM was related to that peptide, then checking the quality of that PSM would be important.
+
 ![Aggregation](fig_script/featuresplot-1.png)
 
 ## Toy QFeatures object
@@ -413,9 +474,14 @@ nNA(cptac_se)
 
 Some imputation method good for MAR and some good for MNAR.
 
+| Type | Assumption about missing values | Purpose of imputation | Key nuance | Typical methods | Proteomics context | Bottom line |
+|------|--------------------------------|------------------------|------------|------------------|--------------------|-------------|
+| MAR  | Similar to observed values     | Estimate plausible values from existing data | Reconstructs the original distribution | KNN, mean/median, regression | Random missingness (e.g. stochastic sampling in DDA, some DIA gaps) | Recover what was likely there |
+| MNAR | Systematically different (e.g. low abundance) | Model missingness mechanism (e.g. detection limit) | Introduces a shifted/bias distribution | Left-shifted Gaussian, minimum value imputation | Low-abundance peptides below detection (common in DDA) | Reflect why it was not observed |
+
 ```{r, eval=FALSE}
 se1 <- impute(cptac_se, method = "knn")
-assay(se1)
+assay(se1) %>% head()
 
 ## Imputation with method "MinDet"
 se2 <- impute(cptac_se, method = "MinDet") # impute with the smallest value in each column

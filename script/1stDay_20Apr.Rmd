@@ -39,6 +39,34 @@ BiocManager::install("remotes")
 BiocManager::install("RforMassSpectrometry/SpectraVis")
 
 install.packages("tidyverse")
+=======
+# library(BiocManager)
+# 
+# # Bioconductor packages
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# 
+# BiocManager::install("tidyverse")
+# BiocManager::install("factoextra")
+# BiocManager::install("msdata")
+# BiocManager::install("mzR")
+# BiocManager::install("rhdf5")
+# BiocManager::install("rpx")
+# BiocManager::install("MsCoreUtils")
+# BiocManager::install("QFeatures")
+# BiocManager::install("Spectra")
+# BiocManager::install("ProtGenerics")
+# BiocManager::install("PSMatch")
+# BiocManager::install("pheatmap")
+# BiocManager::install("limma")
+# BiocManager::install("MSnID")
+# BiocManager::install("rawrr")
+# BiocManager::install("cleaver")
+# remotes::install_github("RforMassSpectrometry/SpectraVis")
+# 
+# install.packages("tidyverse")
+# install.packages("sageR")
+
 ```
 
 ## Review some points about MS data
