@@ -351,7 +351,7 @@ display: none;
 
 <h1 class="title toc-ignore">Introduction to PXDataset2 object</h1>
 <h4 class="author">Mohieddin Jafari</h4>
-<h4 class="date">2026-04-17 15:50:26</h4>
+<h4 class="date">2026-05-01 11:49:03</h4>
 
 </div>
 
@@ -361,8 +361,7 @@ display: none;
 <p>Bioconductor packages tagged by “proteomics”, n = 177 on Nov2024, n =
 188 on 8th Apr2026: <a href="https://bioconductor.org/packages/release/BiocViews.html#___Proteomics" class="uri">https://bioconductor.org/packages/release/BiocViews.html#___Proteomics</a></p>
 <pre class="r"><code>knitr::opts_chunk$set(echo = FALSE)
-## install.package(&quot;BiocManager&quot;)
-
+# install.package(&quot;BiocManager&quot;)
 # library(BiocManager)
 # 
 # # Bioconductor packages
@@ -384,9 +383,11 @@ display: none;
 # BiocManager::install(&quot;limma&quot;)
 # BiocManager::install(&quot;MSnID&quot;)
 # BiocManager::install(&quot;rawrr&quot;)
-# BiocManager::install(&quot;RforMassSpectrometry/SpectraVis&quot;)
+# BiocManager::install(&quot;cleaver&quot;)
+# remotes::install_github(&quot;RforMassSpectrometry/SpectraVis&quot;)
 # 
-# install.packages(&quot;tidyverse&quot;)</code></pre>
+# install.packages(&quot;tidyverse&quot;)
+# install.packages(&quot;sageR&quot;)</code></pre>
 </div>
 <div id="review-some-points-about-ms-data" class="section level2">
 <h2>Review some points about MS data</h2>
@@ -513,7 +514,7 @@ px &lt;- PXDataset(&quot;PXD022816&quot;)
 pxget(px, grep(&quot;mzID&quot;, pxfiles(px))[1:3]) # It might take time for the local access  
 pxget(px, grep(&quot;mzML&quot;, pxfiles(px))[1:3]) # It might take time for the local access 
 
-(px &lt;- PXDataset(&quot;PXD000001&quot;))
+(px &lt;- PXDataset(&quot;PXD000001&quot;)) # To remove any dataset from cache use:unlink(px@cachepath, recursive = TRUE) 
 (pxfiles(px)) # file names of the object
 
 fn &lt;- &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML&quot;
@@ -535,13 +536,16 @@ basename(f)</code></pre>
 <div id="ms-example-data-msdata" class="section level2">
 <h2>MS example data: msdata</h2>
 <pre class="r"><code># Various Mass Spectrometry raw data example files for proteomics and metabolomics
-library(msdata) 
-proteomics()</code></pre>
-<pre><code>## [1] &quot;MRM-standmix-5.mzML.gz&quot;                                                
-## [2] &quot;MS3TMT10_01022016_32917-33481.mzML.gz&quot;                                 
-## [3] &quot;MS3TMT11.mzML&quot;                                                         
-## [4] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML.gz&quot;
-## [5] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01.mzML.gz&quot;</code></pre>
+library(msdata) </code></pre>
+<pre><code>## 
+##  IMPORTANT: msdata will be deprecated and replaced by the new
+##  MsDataHub package -- see https://bioconductor.org/packages/MsDataHub.
+##  Please open an issue at https://github.com/rformassspectrometry/MsDataHub/issues
+##  to inform us of any data from msdata that would need to be moved to MsDataHub.</code></pre>
+<pre class="r"><code>proteomics()</code></pre>
+<pre><code>## [1] &quot;MRM-standmix-5.mzML.gz&quot;               
+## [2] &quot;MS3TMT10_01022016_32917-33481.mzML.gz&quot;
+## [3] &quot;MS3TMT11.mzML&quot;</code></pre>
 <pre class="r"><code>ident()</code></pre>
 <pre><code>## [1] &quot;TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzid&quot;</code></pre>
 <pre class="r"><code>quant()</code></pre>

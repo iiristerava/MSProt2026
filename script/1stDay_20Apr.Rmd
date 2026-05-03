@@ -12,8 +12,7 @@ https://bioconductor.org/packages/release/BiocViews.html#___Proteomics
 
 ```{r setup, include=TRUE, echo=TRUE, eval=FALSE, message=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
-## install.package("BiocManager")
-
+# install.package("BiocManager")
 # library(BiocManager)
 # 
 # # Bioconductor packages
@@ -35,9 +34,11 @@ knitr::opts_chunk$set(echo = FALSE)
 # BiocManager::install("limma")
 # BiocManager::install("MSnID")
 # BiocManager::install("rawrr")
-# BiocManager::install("RforMassSpectrometry/SpectraVis")
+# BiocManager::install("cleaver")
+# remotes::install_github("RforMassSpectrometry/SpectraVis")
 # 
 # install.packages("tidyverse")
+# install.packages("sageR")
 ```
 
 ## Review some points about MS data
