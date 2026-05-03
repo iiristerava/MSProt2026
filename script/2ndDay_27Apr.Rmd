@@ -23,50 +23,51 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 
 #BiocManager::install("cleaver") # library(cleaver) did not work, tried this and it worked
 
-library(rpx)
-library(msdata)
-library(rpx)
-library(Spectra)
-library(tidyverse)
-library(cleaver)
-library(MSnbase)
-library(SpectraVis)
-library(mzR)
-library(PSMatch)
+library(rpx) #Provides access to proteomics data repositories (ProteomeXchange)
+library(msdata) #Provides example mass spectrometry datasets 
+library(Spectra) #A modern, memory‑efficient replacement for some MSnbase functionality, focused on spectra
+library(tidyverse) #A collection of R packages for data manipulation, statistics, and visualization
+library(cleaver) #Simulates enzymatic digestion of proteins (e.g. trypsin digestion)
+library(MSnbase) #Core package for processing, storing, and manipulating MS data
+library(SpectraVis) #Visualization tools for mass spectra
+library(mzR) #Interface to mzML, mzXML, mzData files (raw MS data formats)
+library(PSMatch) #Matches peptide-spectrum matches (PSMs) and protein sequences
 ```
 
-# Toy spectra
+# Toy spectra (small, fake, or highly simplified example data)
 ```{r, warning=FALSE, message=FALSE}
-library(S4Vectors)
-library(Spectra)
+library(S4Vectors) #a Bioconductor package that provides S4-based data structures (DataFrame class important here, S4 is designed for genomic and biological data)
+library(Spectra)#Provides methods for working with MS spectra
+
 ## Let’s create a DataFrame containing MS levels, retention time, m/z and intensities for 2 spectra
 
 ## data.frame
 ## tibble
 (spd <- DataFrame(msLevel = c(1L, 2L), #S4-based extension of data.frame from Bioconductor, designed for genomic and biological data with support for complex metadata and attributes.
-          rtime = c(1.1, 1.2)))
+          rtime = c(1.1, 1.2))) 
+#Creates a dataframe with columns msLevel and rtime. msLevels are 1L and 2L (MS1 and MS2), retention times are chosen and don't really represent anything real here (although MS2 rtime must be after MS1)
 
 spd$mz <- list(
   c(100, 103.2, 132, 210),
   c(45, 100, 200)
-)
+) #Adds a new column called mz to the dataframe. As we have two rows, it adds two lists. The values in the lists are simulated m/z values
 
 spd$intensity <- list(
   c(45, 12, 345, 20),
   c(45, 122, 12)
-)
+) #Same as above, just with the intensity values now
 
-# Convert this generic object to format of Spectra object
-(sp <- Spectra(spd))
+#Convert this generic object to format of Spectra object
+(sp <- Spectra(spd)) #spd is just a dataframe that looks like spectra > R does not know that it represent MS data > Spectra() is used to convert it into an object that R recognizes as spectra. Printing this shows only metadata, which is why the m/z or intensity values are not seen here.
 ```
 
 ```{r, include=FALSE, echo=FALSE, eval=FALSE}
 # Exercise: what are these additional spectra variables that are available as part of this dataset?
-spectraVariables(sp)
-spectraData(sp)
-peaksData(sp)[[1]]
-peaksData(sp)[[2]]
-sp[c(1 ,2, 1, 1)]
+spectraVariables(sp) #Returns the names of all spectrum‑level variables stored in the Spectra object
+spectraData(sp) #Returns the actual spectrum‑level metadata table as a DataFrame. Most values are NA because our toy spectra does not include them
+peaksData(sp)[[1]] #Accessing the actual m/z and intensity peak list of the first spectrum 
+peaksData(sp)[[2]] #Same but for the second list
+sp[c(1 ,2, 1, 1)] #Spectra onjects can be subset, duplicated, reordered etc. Here as an example a new (temporary) Spectra object is created by selecting spectra 1 and 2 from sp and then duplicating spectrum 1 twice. (c() = combines stuff)
 ```
 
 ## Create the Spectra object from f
@@ -75,15 +76,18 @@ sp[c(1 ,2, 1, 1)]
 library(rpx)
 f <- pxget(PXDataset("PXD000001"), 
            "TMT_Erwinia_1uLSike_Top10HCD_isol2_45stepped_60min_01-20141210.mzML")
+#Downloads the named file from PXD000001 dataset, stores it in cache and then the path is saved in f
 (sp <- Spectra(f)) # It retrieves from Hard not memory when it is not manually created spectra (MsBackendMzR), so it takes a little bit of time to retrieve.
 
-print(object.size(sp), units = "Mb") # Small and not overload memory
+#Creates the spectra object, takes a while because we use an actual mzML file and it is in cache and not available as fast as the data we created in the toy spectra example which was stored in memory. Only contains metadata, but it still takes a moment to do
 
-length(sp)
-spectraVariables(sp)
-pd <- peaksData(sp)
-dim(pd[[1345]])
-head(pd[[1345]])
+print(object.size(sp), units = "Mb") # Small and not overload memory, does not need the units determined. If not given those, it returns the size in bytes
+
+length(sp) #The number of spectra currently in the object, usually corresponds to the number of scans.
+spectraVariables(sp) #Returns the names of all spectrum‑level variables stored in the Spectra object
+pd <- peaksData(sp) #PeaksData creates an object with access to the peak level data (m/z, intensities) 
+dim(pd[[1345]]) #Number 1345 refers to the spectrum number 1345. Prints out 193 (the amount of peaks) and 2 (each peak has two values, m/z and intensity)
+head(pd[[1345]]) #Prints m/z and intensity values for 6 first peaks
 
 ?Spectra
 ## ---- ACCESSING AND ADDING DATA ----
@@ -92,6 +96,8 @@ head(pd[[1345]])
 
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#This is just code for making a table with all the information given here, ignore unless you need to do a table for something yourself
+
 library(dplyr)
 library(knitr)
 library(kableExtra)
@@ -190,69 +196,72 @@ ms_fields %>%
 
 ```{r}
 #Two ways for a purpose
-head(msLevel(sp), 250)
-#head(sp$msLevel, 250)
+head(msLevel(sp), 250) #Shows the msLevel (MS1 or MS2) for the 250 first spectrums
+#head(sp$msLevel, 250) #Can also be used to do the same thing
+#To take e.g. the 250 last values, use tail()
 
-msLevel(sp)[[1234]]
-plot(pd[[1234]], type = "h"); grid()
+msLevel(sp)[[1234]] #Shows the MS level of the 1234th spectrum
+plot(pd[[1234]], type = "h"); grid() #Retrieves the peak data for the 1234th spectrum and plots it. type = h creates vertical lines that start from y = 0. grid() adds a background grid. ; is used to separate sequential commands (grid() could also be added underneath without the ;) Grid() adds the grid to the active plot
 
-plot(pd[[1234]], type = "h", xlim = c(450, 500)); grid()
-plot(pd[[1234]], type = "l", xlim = c(450, 500)); grid()
-head(pd[[1234]])
-sp$intensity[[1234]] |> summary()
+plot(pd[[1234]], type = "h", xlim = c(450, 500)); grid() #Same as above but zooms in the m/z range of 450-500
+plot(pd[[1234]], type = "l", xlim = c(450, 500)); grid() #Same as above but uses a continuous line instead of multiple vertical lines
+head(pd[[1234]]) #Shows the 6 first rows (mz and intensity as columns) of the 1234th spectrum
+sp$intensity[[1234]] |> summary() #Takes the intensity values of the 1234th spectrum and uses that as a parameter for the summary(). |> takes the result on the left and passes it as the first argument to the function on the right. This is basically the same thing: summary(sp$intensity[[1234]])
 
-sp$lowMZ[1234]
-sp$highMZ[1234]
-head(precursorMz(sp), 500)
-precursorMz(sp)[1234]
+sp$lowMZ[1234] #Lowest m/z value
+sp$highMZ[1234] #Highest m/z value
+head(precursorMz(sp), 500) #Shows the precursor ion values fro 500 first spectrum. Most are NA as MS1 spectrum don't have precursor ion values as they haven't been fragmented yet
+precursorMz(sp)[1234] #Shows the precursor ion value for the 1234th spectrum specifically
 ```
 
 ```{r}
 #How many MS levels are there, and how many scans of each level?
-table(msLevel(sp))
+table(msLevel(sp)) #Shows how many of the spectra are from MS1 and how many from MS2. There should always be more MS2 
 
 #filter family functions
-(sp2 <- filterMsLevel(sp, 2L))
-#sp[msLevel(sp) == 2L]
+(sp2 <- filterMsLevel(sp, 2L)) #Filters based on the MS level (2L = MS2, 1L = MS1) and saves the result in sp2
+#sp[msLevel(sp) == 2L] #Just another way of filtering
 
-max(sp$basePeakIntensity)
-rtime(sp)[1234]
+max(sp$basePeakIntensity) #Shows the maximum base‑peak intensity observed across all spectra
+rtime(sp)[1234] #Shows the retention time for the 1234th spectrum
 
-plotSpectra(sp2[5404]); grid()
+plotSpectra(sp2[5404]); grid() #plotSpectra is specifically meant to plot mass spectra from a spectra object
 plotSpectra(sp2[1234]); grid()
 plotSpectra(sp2[1230]); grid()
-plotSpectra(sp[226:229]) # MS1 vs. MS2 spectra
+plotSpectra(sp[226:229]) # MS1 vs. MS2 spectra, plotSpectra works also when given a range = plots multiple spectra into on image
 plotSpectra(sp[1]); grid()
 plotSpectra(sp[1:4])
 
 ```
 
-## Visulaize the spectra
+## Visualize the spectra
 ```{r}
 ## The chromatogram can be created by extracting the totIonCurrent (TIC) and rtime variables for all MS1 spectra. 
 ## Lets annotate the spectrum of interest.
+#A spectrum is intensity vs m/z at one time point, while a chromatogram is intensity vs time across many spectra
 
-plot(rtime(sp), tic(sp), type = "l"); grid()
-#plot(sp$rtime, sp$totIonCurrent, type = "l"); grid()
+plot(rtime(sp), tic(sp), type = "l"); grid() #"Plot y as a function of x" > here y is tic and x is rtime. Total Ion Current = sum of all intensities in that scan
 
-(sp1 <- filterMsLevel(sp, 1L))
-plot(rtime(sp1), tic(sp1), type = "l"); grid(); abline(v = rtime(sp)[2807], col = "red")
+#plot(sp$rtime, sp$totIonCurrent, type = "l"); grid() #Just another way to do the same thing
 
-MsCoreUtils::formatRt(rtime(sp)[2800:2820]) # Convert to Min:Sec format
+(sp1 <- filterMsLevel(sp, 1L)) #Creates a new Spectra object, sp1 which contains only MS1 spectra from sp
+plot(rtime(sp1), tic(sp1), type = "l"); grid(); abline(v = rtime(sp)[2807], col = "red") #Same as before, but abline() adds a straight reference line (vertical (v)) that shows where a specific spectrum (number 2807) occurs in time
 
-sp[2807]
+MsCoreUtils::formatRt(rtime(sp)[2800:2820]) # Convert to Min:Sec format. rtime() returns a vector of retention times, usually in seconds, and formatRt() changes that into min:sec format. 
+
+sp[2807] #Returns spectra object that only has metadata about that one spectrum
 
 ```
-## ggplot visualization
+## ggplot visualization (Point was to show that you can visualize the same mass‑spectrometry metadata using ggplot2, not just base R plotting)
 ```{r}
 library(tidyverse)
 
-spectraData(sp) |>
-    as_tibble() |>
-    filter(msLevel == 1) |>
+spectraData(sp) |> #Extracts spectrum‑level metadata
+    as_tibble() |> #Converts Bioconductor DataFrame into a tibble (compatible with e.g. ggplot)
+    filter(msLevel == 1) |> #Filters to plot only MS1 scans
     ggplot(aes(x = rtime,
-               y = totIonCurrent)) +
-    geom_line()
+               y = totIonCurrent)) + #aes() inside the ggplot() layer specifies aesthetics globally. Does not yet draw the plot
+    geom_line() #Draws a line plot (like type = "l" earlier)
 ```
 
 ### Quiz 2 (GA_5)
@@ -262,8 +271,8 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 # The filterPrecursorScan() function can be used to retain a set parent (MS1) and children scans (MS2),
 # as defined by an acquisition number, Use it to extract the MS1 scan of interest and all its MS2 children.
 
-(sp2 <- filterPrecursorScan(sp, 2807)) # a family of scans
-precScanNum(sp2)
+(sp2 <- filterPrecursorScan(sp, 2807)) # a family of scans, keeps the MS1 scan with scan number 2807 and all MS2 scans that were from that MS1 scan
+precScanNum(sp2) #Just a sanity check, shows precursor scan numbers for each scan (MS1 = NA, MS2 =2807)
 
 # Plot the MS1 spectrum of interest and highlight all the peaks that will be selected for MS2 analysis
 # plotSpectra()
@@ -471,7 +480,7 @@ Examples:
 
 
 ```{r, eval=FALSE}
-#library(PSMatch)
+library(PSMatch)
 calculateFragments("TAFDEAIAELDTLNEESYK")
 calculateFragments("TAFDEAIAELDTLNEESYK", type=c("a", "b", "c", "x", "y", "z"),
                    z=1:2)
