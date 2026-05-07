@@ -225,7 +225,7 @@ filter(pdi,
     arrange(intensity)
 
 spid[i] |>
-    filterIntensity(500) |> # check 500 and 100
+    filterIntensity(1000) |> # check 500 and 100
     plotSpectra(labels = addFragments,
                 labelCol = "steelblue",
                 labelPos = 3); grid()
@@ -329,7 +329,7 @@ assay(feat1[[2]])
 rowData(feat1[[2]])
 rowData(feat1[[1]])
 ```
-If you directly use the output of MaxQuant, PD or sage, you do not need the following BUT you will miss the **smart** filtering of data
+> If you directly use the output of MaxQuant, PD or sage, you do not need the following BUT you will miss the **smart** filtering of data
 
 ```{r}
 
