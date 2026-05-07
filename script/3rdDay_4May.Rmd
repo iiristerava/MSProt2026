@@ -12,21 +12,21 @@ Visit `gosocrative.com` and enter room name `FIN2026`
 
 ## Library
 ```{r, eval=FALSE}
-# library(rpx)
-# library(msdata)
-# library(rpx)
-# library(Spectra)
-# library(tidyverse)
-# library(cleaver)
-# library(MSnbase)
-# library(tidyverse)
-# library(mzR)
-# library(PSMatch)
-# library(pheatmap)
-# library(QFeatures)
-# library(sageR)
-# library(SummarizedExperiment)
-# library(factoextra)
+library(rpx)
+library(msdata)
+library(rpx)
+library(Spectra)
+library(tidyverse)
+library(cleaver)
+library(MSnbase)
+library(tidyverse)
+library(mzR)
+library(PSMatch)
+library(pheatmap)
+library(QFeatures)
+library(sageR)
+library(SummarizedExperiment)
+library(factoextra)
 ```
 
 ## Preprocessing
@@ -329,7 +329,8 @@ assay(feat1[[2]])
 rowData(feat1[[2]])
 rowData(feat1[[1]])
 ```
-If you directly use the output of MaxQuant, PD or sage, you do not need the following BUT you will miss the **smart** filtering of data
+If you directly use the output of MaxQuant, PD or sage, you do not need the following BUT you will miss the **smart** filtering of data > REMEMBER TO DO THIS IN CAPSTONE PROJECT
+
 
 ```{r}
 
@@ -409,7 +410,7 @@ i <- 56:61
                                      sep = "\t")
 )
 colData(cptac_se)
-## Contaminant database/fasta: CRAP, you can downlaod it
+## Contaminant database/fasta: CRAP, you can download it
 ```
 
 ```{r}
@@ -523,6 +524,42 @@ table(rowData(cptac_se)$Potential.contaminant)
     normalize(i = "log_peptides",
               name = "lognorm_peptides",
               method = "center.median"))
+
+#Group task (which contains most decoys)
+
+library(rpx)
+px <- PXDataset("PXD022816")
+pxfiles(px)
+pxtax(px)
+pxref(px)
+fmzml <- pxget(px, grep("mzML", pxfiles(px), value = TRUE)[1:3])
+basename(fmzml)
+fid <- pxget(px, grep("mzID", pxfiles(px), value = TRUE)[1:3])
+basename(fid)
+
+sp <- Spectra(fmzml)
+sp
+sp$file <- basename(dataOrigin(sp))
+table(basename(dataOrigin(sp)), msLevel(sp))
+filterMsLevel(sp, 1)|>
+spectraData() |>
+as_tibble() |>
+ggplot(aes(x = rtime,
+y = totIonCurrent,
+colour = file)) +
+geom_line() +
+facet_wrap(~ file)
+id <- PSM(fid)
+id$file <- sub("^. QEP2", "QEP2", id$spectrumFile)
+
+data.frame(id) |> 
+as_tibble() |> 
+dplyr::count(file)
+
+data.frame(id) |> as_tibble() |> ggplot(aes(x = MetaMorpheus.score, colour = isDecoy)) +
+    geom_density() + facet_wrap(~ file)
+
+summary(id$PSM.level.q.value)
 ```
 
 ### Aggregation
