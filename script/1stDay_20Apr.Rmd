@@ -51,7 +51,7 @@ It is usually expressed in **orders of magnitude (powers of 10)**.
 - A dynamic range of $10^{6}$ means the largest signal is **1,000,000× bigger** than the smallest detectable one.
 - In biology, dynamic range is critical because molecules can exist at **vastly different concentrations in the same sample**.
 
-![Mount Damavand](fig_script/damavand.jpeg){fig-align="center" width=75%}
+[![Mount Damavand](fig_script/damavand.jpeg)](https://maps.app.goo.gl/ohwhYRygs5ZUAvdk6){fig-align="center" width=75%}
 ![Fruit fly](fig_script/drosoph1c.jpg){fig-align="center" width=25%}
 
 
