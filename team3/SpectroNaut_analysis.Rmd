@@ -19,56 +19,141 @@ library(limma)
 ```
 
 
+
+
 # Load Spectronaut file
 
 ```{r}
 setwd('~/Desktop/proj/MsProteomics/')
 
-df.main <- fread("./20260524/20260524_151525_MSProt2026_G3_Spectronaut_Updated_fasta_contaminants_22052026_Report.xls",
-            nrows = 1000000)
+df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
 
+df.main <- df.main %>%
+  filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
+  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"))%>%
+  as.data.frame()
+
+filenames <- strsplit(df.main$R.FileName, split = '_')
+df.main$group <- unlist(lapply(X = filenames,
+                               FUN = function(x){return(x[1])}))
+
+df.main$Rep <- unlist(lapply(X = filenames,
+                               FUN = function(x){return(x[length(x)])}))
+
+table(df.main$group)
+rabahIdx <- which(df.main$group=='20260331')
+df.main$group[rabahIdx] <- paste0('Rabah_', df.main$group[rabahIdx])
+table(df.main$group)
+
+rm(filenames, rabahIdx)
+gc()
 colnames(df.main)
+
+```
+
+
+# Nr peptides
+
+```{r}
+metaData <- df.main %>%
+  select(R.FileName, SampleID, R.Condition, group, Rep) %>%
+  group_by(R.FileName, Rep)%>%
+  mutate(NrPEP = as.factor(n()))%>%
+  distinct()%>%
+  as.data.frame()
+
+
+
+p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
+  geom_tile(color = "white", linewidth = 1) +
+  facet_wrap(~ group, scales = "free_x", ncol = 5) +
+  scale_fill_manual(values = c("201311" = "skyblue",  
+                               "402622" = "#FFB74D",  
+                               "410269" = "#E53935")) + 
+  theme_bw() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1, colour = 'black'),
+    axis.text.y = element_text(colour = 'black'),
+    axis.title = element_text(face = 'bold', size = 13),
+    legend.title = element_text(face = 'bold', size = 13, colour = 'black'),
+    legend.text = element_text(size = 10, colour = 'black'),
+    title = element_text(face = 'bold', size = 10, colour = 'black')
+  ) +
+  labs(
+    title = "Quantified Peptide/Precursor Counts",
+    subtitle = "Colors indicate distinct peptide totals for individual replicates across conditions",
+    y = "Replicate",
+    x = "Sample",
+    fill = "NrPEP"
+  )
+#  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
+
 ```
 
 # Decoy ~ Target
 
 ```{r}
-df <- df.main %>%
-  select(R.FileName, R.Condition,EG.Cscore, EG.IsDecoy) %>%
-  rename(R.FileName = 'FileName',
-         R.Condition = 'Condition',
-         EG.IsDecoy = 'IsDecoy',
-         EG.Cscore = 'Cscore')%>%
+df.main <- df.main %>%
   mutate(
-  type = ifelse(IsDecoy, "Decoy", "Target")
-  )
+  EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
+  EG.IsDecoy = as.logical(toupper(EG.IsDecoy)),
+  EG.Cscore = as.numeric(EG.Cscore),
+  group = as.factor(group),
+  type = ifelse(EG.IsDecoy, "Decoy", "Target")
+  ) %>%
+  as.data.frame()
 
+table(df.main$EG.IsDecoy)
 
-tab <- df %>%
-  group_by(FileName) %>%
+tab <- df.main %>%
+  group_by(R.FileName) %>%
   summarise(
-    Nr_Decoy = sum(IsDecoy == "TRUE"),
+    Nr_Decoy = sum(EG.IsDecoy),
     Total_Precursor = n(),
-    Percent_Decoy = round(100 * mean(IsDecoy == "TRUE"), 2)
+    Percent_Decoy = round(100 * mean(EG.IsDecoy), 2)
   )
 
 kable(tab)
 
 message("The average number of Decoys in all samples is:  ", mean(tab$Percent_Decoy), '%')
 
+sum(is.na(df.main$EG.Cscore))
 
-p <- ggplot(df, aes(Cscore, color = type, fill = type)) +
-  geom_density(alpha = 0.25, linewidth = .5) +
-  facet_wrap(~FileName, ncol=10)+
+density_data <- df.main %>%
+  group_by(R.FileName, type) %>%
+  reframe(
+    Score = density(EG.Cscore, na.rm = TRUE)$x,
+    Density = density(EG.Cscore, na.rm = TRUE)$y
+  )%>%
+  as.data.frame()%>%
+  left_join(metaData, by = "R.FileName")
+  
+
+
+p <- ggplot(density_data, aes(
+  x = Score, 
+  y = Density, 
+  color = type, 
+  group = interaction(R.FileName, type) 
+)) +
+  geom_line(aes(linetype = as.character(Rep)), linewidth = 0.7, alpha = 0.8) +
+  facet_grid(group ~ R.Condition) +
   scale_color_manual(values = c(Decoy = "red", Target = "blue")) +
-  scale_fill_manual(values = c(Decoy = "red", Target = "blue")) +
-  labs(title = "C Score Density", x = "Score", y = "Density") +
-  theme_bw()
+  labs(
+    title = "C Score Density by Replicate",
+    x = "C Score", 
+    y = "Density",
+    linetype = "Replicate" 
+  ) +
+  theme_bw() 
+
 
 p
 
 # ggsave("Cscore Density.png", p, width = 8, height = 5, dpi = 300)
-rm(df)
+rm(density_data)
 gc()
 ```
 
@@ -77,7 +162,7 @@ gc()
 ```{r}
 quant_wide <- df.main %>%
   select(EG.PrecursorId, R.FileName, FG.Quantity) %>%
-  mutate(FG.Quantity = as.numeric(FG.Quantity)) %>%
+  mutate(FG.Quantity = as.numeric(gsub(",", ".", FG.Quantity))) %>%
   pivot_wider(
     names_from = R.FileName,
     values_from = FG.Quantity,
@@ -86,17 +171,17 @@ quant_wide <- df.main %>%
   as.data.frame()
 
 rownames(quant_wide) <- quant_wide$EG.PrecursorId
-quant_matrix <- as.matrix(quant_wide[, -1])
+quant_matrix <- as.matrix(quant_wide[, -1]) 
 
 
 col_data <- df.main %>%
-  select(R.FileName, R.Condition, R.Replicate) %>%
+  select(R.FileName, SampleID, R.Condition, Rep, group) %>%
   distinct() %>%
   as.data.frame()
 
 rownames(col_data) <- col_data$R.FileName
 
-quant_matrix <- quant_matrix[, rownames(col_data)]
+quant_matrix <- quant_matrix[, rownames(col_data)] # *** important ***
 
 
 row_data <- df.main %>%
@@ -109,9 +194,7 @@ row_data <- df.main %>%
     IsDecoy = EG.IsDecoy
   ) %>%
   mutate(
-    PEP = as.numeric(PEP),
-    Score = as.numeric(Score)
-  ) %>%
+    PEP = as.numeric(gsub(",", ".", PEP))) %>%
   group_by(EG.PrecursorId) %>%
   dplyr::slice(1) %>% # Take the metadata from the first appearance of the precursor
   ungroup() %>%
@@ -121,7 +204,7 @@ row_data <- df.main %>%
 rownames(row_data) <- row_data$EG.PrecursorId
 
 # CRITICAL: Ensure the rows of the metadata match the rows of the matrix exactly
-row_data <- row_data[rownames(quant_matrix), ]
+row_data <- row_data[rownames(quant_matrix), ] # *** important ***
 
 
 spectronaut_se <- SummarizedExperiment(
@@ -140,24 +223,45 @@ gc()
 # Missing Values
 
 ```{r}
-#  png("missing_values_per_sample.png", width = 800, height = 600, res = 120)
-barplot(
-  nNA(spectronaut_se)$nNAcols$nNA, 
-  main = "Missing Values per Sample",
-  ylab = "Count of NAs",
-  las = 2
-)
-#  dev.off()
+na_df <- data.frame(
+  Sample = colnames(spectronaut_se), 
+  Missing_Count = nNA(spectronaut_se)$nNAcols$nNA
+)%>%
+  left_join(as.data.frame(colData(spectronaut_se)), by = c('Sample'='R.FileName'))
 
-#  knitr::include_graphics("missing_values_per_sample.png")
+na_df$Sample <- factor(na_df$Sample, levels = na_df$Sample)
 
-table(nNA(spectronaut_se)$nNArows$nNA)
+p_na <- ggplot(na_df, aes(x = SampleID, y = Missing_Count)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.8, width = .5) +
+  facet_grid(Rep~group, scales='free_x')+
+  labs(
+    title = "Missing Values per Sample",
+    x = "Sample",
+    y = "Count of NAs"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    plot.title = element_text(face = "bold")
+  )
+
+
+p_na
+
+# Optional: Save it just like your other plots
+# ggsave("missing_values_per_sample.png", p_na, width = 10, height = 6, dpi = 300)
+
+rm(na_df)
+gc
 ```
 
 # Imputation
 
 ```{r}
-spectronaut_se <- filterNA(spectronaut_se, pNA = 60/84) #  71 %
+dim(spectronaut_se)
+spectronaut_se <- filterNA(spectronaut_se, pNA = 0.70) #  70 %
+dim(spectronaut_se)
+
 
 table(nNA(spectronaut_se)$nNArows$nNA)
 nNA(spectronaut_se)
@@ -310,16 +414,17 @@ df <- spectronaut_filtered["P04406", ,
             c("lognorm_peptides", "proteins")] |>
   longFormat() |>
   as.data.frame() |>
-  dplyr::filter(!is.na(value))
+  dplyr::filter(!is.na(value)) |>
+  left_join(as.data.frame(colData(spectronaut_filtered)), by = c('colname'='R.FileName'))
 
 
 
 p <- ggplot(df, aes(x = colname, y = value, group = rowname, color = rowname)) +
   geom_line(linewidth = 1, show.legend = F) +
   geom_point(size = 2, show.legend = F) +
-  facet_wrap(~ assay) +
+  facet_grid(assay~group, scales='free') +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.text.x = element_blank()) +
   labs(
     title = "Protein Aggregation Profile (P04406: GAPDH)", 
     x = "Sample", 
@@ -384,30 +489,51 @@ plot(spectronaut_filtered)
 # Comparison of normalization methods
 
 ```{r}
-#  png("comparison_of_normalized_methods.png", width = 1200, height = 1000, res = 120)
+df_median <- as.data.frame(assay(spectronaut_filtered[["proteins"]])) %>%
+  pivot_longer(cols = everything(), names_to = "Sample", values_to = "Intensity") %>%
+  mutate(Method = "Median Centered")
 
-par(mfrow = c(1, 3), mar = c(8, 4, 4, 1))
+df_quantiles <- as.data.frame(assay(spectronaut_filtered[["proteins2"]])) %>%
+  pivot_longer(cols = everything(), names_to = "Sample", values_to = "Intensity") %>%
+  mutate(Method = "Quantiles")
 
-boxplot(assay(spectronaut_filtered[["proteins"]]), 
-        main = "Median Centered", 
-        col = "lightblue", 
-        las = 2) 
+df_vsn <- as.data.frame(assay(spectronaut_filtered[["proteins3"]])) %>%
+  pivot_longer(cols = everything(), names_to = "Sample", values_to = "Intensity") %>%
+  mutate(Method = "VSN")
 
-boxplot(assay(spectronaut_filtered[["proteins2"]]), 
-        main = "Quantiles", 
-        col = "lightgreen", 
-        las = 2)
+df_boxplots <- bind_rows(df_median, df_quantiles, df_vsn)%>%
+  left_join(as.data.frame(colData(spectronaut_filtered)), by = c('Sample'='R.FileName'))
 
-boxplot(assay(spectronaut_filtered[["proteins3"]]), 
-        main = "VSN", 
-        col = "lightcoral", 
-        las = 2)
 
-par(mfrow = c(1, 1))
-#  dev.off()
+rm(df_median, df_quantiles, df_vsn)
 
-#  knitr::include_graphics("comparison_of_normalized_methods.png")
+df_boxplots$Method <- factor(df_boxplots$Method, 
+                             levels = c("Median Centered", "Quantiles", "VSN"))
 
+p_box <- ggplot(df_boxplots, aes(x = Sample, y = Intensity, fill = Method)) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.8) +
+  facet_grid(Method ~ group, scales = "free") +
+  scale_fill_manual(values = c("Median Centered" = "lightblue", 
+                               "Quantiles" = "lightgreen", 
+                               "VSN" = "lightcoral")) +
+  labs(
+    title = "Comparison of Normalization Methods",
+    x = "Sample",
+    y = "Normalized Intensity"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 7),
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "none" 
+  )
+
+p_box
+
+#  ggsave("comparison_of_normalized_methods_ggplot.png", p_box, width = 12, height = 6, dpi = 300)
+  
+rm(df_boxplots)
+gc()
 ```
 
 # PCA
@@ -439,7 +565,7 @@ var_explained <- (pca_result$sdev^2) / sum(pca_result$sdev^2) * 100
 pc1_var <- round(var_explained[1], 1)
 pc2_var <- round(var_explained[2], 1)
 
-pca_df <- as.data.frame(pca_result$x) %>%
+pca_df <- as.data.frame(pca_result$x[,1:4]) %>%
   mutate(R.FileName = rownames(.)) %>%
   left_join(as.data.frame(colData(spectronaut_filtered)), by = "R.FileName")
 
@@ -461,7 +587,29 @@ p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileNam
 
 p
 
-#  ggsave("PCA.png", p, width = 8, height = 5, dpi = 300)
+#  ggsave("PCA_cond.png", p, width = 8, height = 5, dpi = 300)
+
+
+
+p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  labs(
+    title = "Principal Component Analysis (PCA)",
+    subtitle = "Based on Quantile-Normalized Protein Intensities",
+    x = paste0("PC1 (", pc1_var, "% Variance)"),
+    y = paste0("PC2 (", pc2_var, "% Variance)")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+
+
+p
+
+#  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
 
 ```
 
