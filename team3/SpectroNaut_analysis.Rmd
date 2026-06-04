@@ -11,46 +11,108 @@ output: github_document
 library(knitr)
 library(data.table)
 library(tidyverse)
+
 library(ggplot2)
 library(ggrepel)
+library(grid)
+library(gridExtra)
+
 library(QFeatures)
 library(SummarizedExperiment)
 library(limma)
+library(UpSetR)
 ```
 
+# Load Contaminants
 
+```{r}
+# A custom function to read FASTA files without stripping headers
+#    read_fasta_full <- function(file_path) {
+#      lines <- readLines(file_path)
+#      is_header <- grepl("^>", lines)
+#      
+#      headers <- lines[is_header]
+#      
+#      # Find start and end indices for each sequence block
+#      starts <- which(is_header) + 1
+#      ends <- c(which(is_header)[-1] - 1, length(lines))
+#      
+#      # Collapse multi-line sequences into a single string per header
+#      seqs <- mapply(function(s, e) paste(lines[s:e], collapse=""), starts, ends)
+#      names(seqs) <- headers
+#      return(seqs)
+#    }
+
+# ---------------------------------------------------------------------
+
+#   setwd('~/Desktop/proj/MsProteomics/')
+#   
+#   refastA <- read_fasta_full("./Comb_uniprotkb_2026_05_18_Contaminants.fasta")
+#   accs <- strsplit(names(refastA), split = '\\|')
+#   accs <- data.frame(do.call(rbind, lapply(accs, function(x) x[2:3])))
+#   accsContam <- accs$X1[grep('CON_', accs$X2)]
+#   rm(refastA, accs, read_fasta_full)
+#   gc()
+```
 
 
 # Load Spectronaut file
 
 ```{r}
-setwd('~/Desktop/proj/MsProteomics/')
+#   df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
+#   
+#   df.main <- df.main %>%
+#     filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
+#     mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
+#            
+#            EG.IsDecoy = as.logical(toupper(EG.IsDecoy)),
+#            FG.Quantity = as.numeric(gsub(",", ".", FG.Quantity)),
+#            EG.PEP = as.numeric(gsub(",", ".", EG.PEP)),
+#            EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
+#            
+#            type = ifelse(EG.IsDecoy, "Decoy", "Target"),
+#            Potential.contaminant = ifelse(PG.ProteinGroups%in%accsContam, "+", "-"),
+#            )%>%
+#     as.data.frame()
+#   
+#   
+#   
+#   filenames <- strsplit(df.main$R.FileName, split = '_')
+#   df.main$group <- unlist(lapply(X = filenames,
+#                                  FUN = function(x){return(x[1])}))
+#   
+#   
+#   table(df.main$group)
+#   rabahIdx <- which(df.main$group=='20260331')
+#   df.main$group[rabahIdx] <- paste0('Rabah_', df.main$group[rabahIdx])
+#   df.main$group <- as.factor(df.main$group)
+#   table(df.main$group)
+#   
+#   
+#   df.main$Rep <- unlist(lapply(X = filenames,
+#                                  FUN = function(x){return(x[length(x)])}))
+#   
+#   
+#   saveRDS(df.main, './FilteredCleaned_Spectronaut_Report.RDS')
+#   
+#   rm(accsContam, filenames, rabahIdx)
+#   gc()
+# --------------------------------------
+# ***************************************************
+# ************************
+df.main <- readRDS('./FilteredCleaned_Spectronaut_Report.RDS')
 
-df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
-
-df.main <- df.main %>%
-  filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
-  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
-         EG.IsDecoy = as.logical(toupper(EG.IsDecoy)))%>%
-  as.data.frame()
-
-filenames <- strsplit(df.main$R.FileName, split = '_')
-df.main$group <- unlist(lapply(X = filenames,
-                               FUN = function(x){return(x[1])}))
-
-df.main$Rep <- unlist(lapply(X = filenames,
-                               FUN = function(x){return(x[length(x)])}))
-
-table(df.main$group)
-rabahIdx <- which(df.main$group=='20260331')
-df.main$group[rabahIdx] <- paste0('Rabah_', df.main$group[rabahIdx])
-table(df.main$group)
-
-rm(filenames, rabahIdx)
-gc()
 colnames(df.main)
 
+gc()
+# ************************
+# ***************************************************
+```
 
+
+# Nr peptides
+
+```{r fig.width=15, fig.height=7, dpi=300}
 metaData <- df.main %>%
   select(R.FileName, SampleID, R.Condition, group, Rep) %>%
   group_by(R.FileName, Rep)%>%
@@ -59,15 +121,8 @@ metaData <- df.main %>%
   as.data.frame()
 
 
-write.csv(metaData, 'metaData.csv', row.names=FALSE)
-```
-
-
-# Nr peptides
-
-```{r fig.width=15, fig.height=7, dpi=300}
-
-#  metaData <- read.csv('metaData.csv')
+  write.csv(metaData, 'metaData.csv', row.names=FALSE)
+#   metaData <- read.csv('metaData.csv')
 
 p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
   geom_tile(color = "white", linewidth = 1) +
@@ -103,18 +158,11 @@ p
 # Decoy ~ Target
 
 ```{r fig.width=15, fig.height=13, dpi=300}
-df.main <- df.main %>%
-  mutate(
-  EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
-  EG.Cscore = as.numeric(EG.Cscore),
-  group = as.factor(group),
-  type = ifelse(EG.IsDecoy, "Decoy", "Target")
-  ) %>%
-  as.data.frame()
 
 table(df.main$EG.IsDecoy)
 
 tab <- df.main %>%
+  filter(n() >= 2) %>% # just to make sure
   group_by(R.FileName) %>%
   summarise(
     Nr_Decoy = sum(EG.IsDecoy),
@@ -169,7 +217,6 @@ gc()
 ```{r}
 quant_wide <- df.main %>%
   select(EG.PrecursorId, R.FileName, FG.Quantity) %>%
-  mutate(FG.Quantity = as.numeric(gsub(",", ".", FG.Quantity))) %>%
   pivot_wider(
     names_from = R.FileName,
     values_from = FG.Quantity,
@@ -198,10 +245,9 @@ row_data <- df.main %>%
     Proteins = PG.ProteinGroups,
     PEP = EG.PEP,
     Score = EG.Cscore,
+    Potential.contaminant,
     IsDecoy = EG.IsDecoy
   ) %>%
-  mutate(
-    PEP = as.numeric(gsub(",", ".", PEP))) %>%
   group_by(EG.PrecursorId) %>%
   dplyr::slice(1) %>% # Take the metadata from the first appearance of the precursor
   ungroup() %>%
@@ -222,6 +268,9 @@ spectronaut_se <- SummarizedExperiment(
 
 head(assay(spectronaut_se))
 anyNA(assay(spectronaut_se))
+
+
+saveRDS(spectronaut_se, 'spectronaut_se.RDS')
 
 rm(df.main, quant_wide, row_data, col_data, quant_matrix)
 gc()
@@ -292,6 +341,9 @@ par(mfrow = c(1, 1))
 #  dev.off()
 
 #  knitr::include_graphics("imputation_comparison.png")
+
+rm(se1, se2, se3)
+gc()
 ```
 
 # QF object
@@ -300,27 +352,22 @@ par(mfrow = c(1, 1))
 # --------------------------------------
 # ------- knn was selected -----------------
 # -----------------------------------
-
+set.seed(123)
 # ***************************************************************
 # ---------------------------------------------------------
-spectronaut_qf <- QFeatures(list(
-  peptides_raw = spectronaut_se,
-  peptides_knn = se1              
-))
-
-# -----------------------------------------------------
-rm(se1, se2, se3)
-gc()
-# -----------------------------------------------------
+spectronaut_qf <- QFeatures(list(peptides_raw = spectronaut_se))
+colData(spectronaut_qf) <- colData(spectronaut_se)
 
 
-colData(spectronaut_qf) <- colData(spectronaut_qf[[1]])
+invisible(capture.output({
+  spectronaut_qf <- impute(
+  spectronaut_qf, 
+  i = "peptides_raw", 
+  name = "peptides_knn", 
+  method = "knn"
+  )
+}))
 
-is_contam <- grepl("CON_", rowData(spectronaut_qf[["peptides_raw"]])$Proteins)
-rowData(spectronaut_qf[["peptides_raw"]])$Potential.contaminant <- ifelse(is_contam, "+", "")
-
-is_contam <- grepl("CON_", rowData(spectronaut_qf[["peptides_knn"]])$Proteins)
-rowData(spectronaut_qf[["peptides_knn"]])$Potential.contaminant <- ifelse(is_contam, "+", "")
 
 table(rowData(spectronaut_qf[["peptides_raw"]])$IsDecoy)
 table(rowData(spectronaut_qf[["peptides_raw"]])$Potential.contaminant)
@@ -331,12 +378,20 @@ table(rowData(spectronaut_qf[["peptides_knn"]])$Potential.contaminant)
 
 spectronaut_filtered <- spectronaut_qf |>
   filterFeatures(~ IsDecoy == "FALSE" | IsDecoy == FALSE) |> 
-  filterFeatures(~ Potential.contaminant != "+") |>  # Remove Contaminants (adjust "CON_" if necessary)
+  filterFeatures(~ Potential.contaminant != "+") |> 
   filterFeatures(~ PEP < 0.05)
 
 dim(spectronaut_se)
 dim(spectronaut_filtered[["peptides_raw"]])
 dim(spectronaut_filtered[["peptides_knn"]])
+
+
+message("Number of proteins are: \nBefore filtering: ",
+        length(unique(rowData(spectronaut_qf[["peptides_raw"]])$Proteins)),
+        "\nAfter filtering: ",
+        length(unique(rowData(spectronaut_filtered[["peptides_raw"]])$Proteins)))
+
+
 
 rm(spectronaut_se, spectronaut_qf)
 gc()
@@ -481,16 +536,16 @@ spectronaut_filtered <- normalize(
 
 # Processing_Tree
 
-```{r}
+```{r fig.width=13, fig.height=9, dpi=300}
 #  png("QFeatures_Assay_Topology(Data_Processing_Tree).png", width = 1000, height = 800, res = 120)
 plot(spectronaut_filtered)
 #  dev.off()
 
-#  save(spectronaut_filtered, file = 'spectronaut_filtered.RData')
+saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
 
 #  knitr::include_graphics("QFeatures_Assay_Topology(Data_Processing_Tree).png")
 
-# saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
+saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
 ```
 
 
@@ -544,9 +599,9 @@ rm(df_boxplots)
 gc()
 ```
 
-# PCA 1
+# PCA 
 
-```{r}
+```{r fig.width=15, fig.height=13, dpi=300}
 # --------------------------------------
 # ------- quantile normalization was selected -----------------
 # -----------------------------------
@@ -556,9 +611,7 @@ gc()
 # --------------------------------------------------------
 mat <- assay(spectronaut_filtered[["proteins2"]])
 
-mat_complete <- mat[rowSums(is.na(mat)) == 0, ]
-
-message("Number of proteins used for PCA: ", nrow(mat_complete))
+mat_complete <- mat[rowSums(is.na(mat)) == 0, ] # just to make sure
 
 mat_transposed <- t(mat_complete)
 
@@ -622,9 +675,9 @@ p_gr
 ```
 
 
-# PCA 2
+# PCA (removing batch effect)
 
-```{r}
+```{r fig.width=15, fig.height=13, dpi=300}
 
 mat <- assay(spectronaut_filtered[["proteins2"]])
 mat_complete <- mat[rowSums(is.na(mat)) == 0, ]
@@ -682,5 +735,94 @@ p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName))
 
 
 p_gr
+```
+
+# DE analysis
+
+```{r fig.width=15, fig.height=13, dpi=300}
+spectronaut_filtered <- readRDS('spectronaut_filtered.RDS')
+
+mat <- assay(spectronaut_filtered[["proteins2"]])
+metadata <- as.data.frame(colData(spectronaut_filtered))
+
+metadata$Safe.Condition <- make.names(metadata$R.Condition)
+
+design <- model.matrix(~ 0 + Safe.Condition + group, data = metadata)
+
+colnames(design) <- gsub("Safe.Condition", "", colnames(design))
+
+fit <- lmFit(mat, design)
+
+contrasts <- makeContrasts(
+  # Baseline Knockout Effect (What does losing c-jun do normally?)
+  KO_vs_CTRL = c.jun_KO - CTRL,
+  
+  # cDDP Effect on Wildtype Cells
+  CTRL_cDDP_06h_vs_CTRL = CTRL_cDDP_06h - CTRL,
+  CTRL_cDDP_24h_vs_CTRL = CTRL_cDDP_24h - CTRL,
+  
+  # cDDP Effect on Knockout Cells (Isolating the drug response in KO)
+  KO_cDDP_06h_vs_KO = c.jun_KO_cDDP_06h - c.jun_KO,
+  KO_cDDP_24h_vs_KO = c.jun_KO_cDDP_24h - c.jun_KO,
+  KO_Time_Progression = c.jun_KO_cDDP_24h - c.jun_KO_cDDP_06h,
+  
+  # Inhibitor Effect on Wildtype Cells
+  Inhibitor_06h_vs_CTRL = CTRL_JNK.IN.8_cDDP_06h - CTRL,
+  Inhibitor_24h_vs_CTRL = CTRL_JNK.IN.8_cDDP_24h - CTRL,
+  Inhibitor_Time_Progression = CTRL_JNK.IN.8_cDDP_24h - CTRL_JNK.IN.8_cDDP_06h,
+  
+  # Chemical Inhibition vs Genetic Ablation (The ultimate specificity test)
+  Inhibitor_vs_KO_06h = CTRL_JNK.IN.8_cDDP_06h - c.jun_KO_cDDP_06h,
+  Inhibitor_vs_KO_24h = CTRL_JNK.IN.8_cDDP_24h - c.jun_KO_cDDP_24h,
+  
+  levels = design
+)
+
+fit2 <- contrasts.fit(fit, contrasts)
+fit2 <- eBayes(fit2)
+
+
+results_matrix <- decideTests(fit2, p.value = 0.05)
+
+# Create a binary dataframe for UP-regulated proteins
+# This mathematical trick turns all 1s to 1, and everything else to 0
+up_matrix <- as.data.frame((results_matrix == 1) * 1)
+updep <- grid.grabExpr(
+  print(upset(up_matrix,
+              nsets = 11,             
+              nintersects = 30,       
+              order.by = "freq",      
+              main.bar.color = "red3", 
+              sets.bar.color = "gray30",
+              text.scale = 1.5))
+)
+
+grid.arrange(updep,
+             vp = viewport(x = 0.42),
+             top = textGrob("Up-regulated proteins", 
+                            #x = 0.62, just = "center",
+                            gp = gpar(fontsize = 18, fontface = "bold")))
+
+
+# 2. Create a binary dataframe for DOWN-regulated proteins
+# This turns all -1s to 1 (meaning "yes, it is down-regulated"), and everything else to 0
+down_matrix <- as.data.frame((results_matrix == -1) * 1)
+downplot <- grid.grabExpr(
+  print(upset(down_matrix,
+              nsets = 11,             
+              nintersects = 30,       
+              order.by = "freq",      
+              main.bar.color = "blue", 
+              sets.bar.color = "gray30",
+              text.scale = 1.5))
+)
+
+grid.arrange(downplot,
+             vp = viewport(x = 0.42),
+             top = textGrob("Down-regulated proteins", 
+                            #x = 0.62, just = "center",
+                            gp = gpar(fontsize = 18, fontface = "bold")))
+
+
 ```
 

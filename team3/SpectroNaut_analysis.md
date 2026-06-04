@@ -9,68 +9,119 @@ peyman
 library(knitr)
 library(data.table)
 library(tidyverse)
+
 library(ggplot2)
 library(ggrepel)
+library(grid)
+library(gridExtra)
+
 library(QFeatures)
 library(SummarizedExperiment)
 library(limma)
+library(UpSetR)
+```
+
+# Load Contaminants
+
+``` r
+# A custom function to read FASTA files without stripping headers
+#    read_fasta_full <- function(file_path) {
+#      lines <- readLines(file_path)
+#      is_header <- grepl("^>", lines)
+#      
+#      headers <- lines[is_header]
+#      
+#      # Find start and end indices for each sequence block
+#      starts <- which(is_header) + 1
+#      ends <- c(which(is_header)[-1] - 1, length(lines))
+#      
+#      # Collapse multi-line sequences into a single string per header
+#      seqs <- mapply(function(s, e) paste(lines[s:e], collapse=""), starts, ends)
+#      names(seqs) <- headers
+#      return(seqs)
+#    }
+
+# ---------------------------------------------------------------------
+
+#   setwd('~/Desktop/proj/MsProteomics/')
+#   
+#   refastA <- read_fasta_full("./Comb_uniprotkb_2026_05_18_Contaminants.fasta")
+#   accs <- strsplit(names(refastA), split = '\\|')
+#   accs <- data.frame(do.call(rbind, lapply(accs, function(x) x[2:3])))
+#   accsContam <- accs$X1[grep('CON_', accs$X2)]
+#   rm(refastA, accs, read_fasta_full)
+#   gc()
 ```
 
 # Load Spectronaut file
 
 ``` r
-setwd('~/Desktop/proj/MsProteomics/')
+#   df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
+#   
+#   df.main <- df.main %>%
+#     filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
+#     mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
+#            
+#            EG.IsDecoy = as.logical(toupper(EG.IsDecoy)),
+#            FG.Quantity = as.numeric(gsub(",", ".", FG.Quantity)),
+#            EG.PEP = as.numeric(gsub(",", ".", EG.PEP)),
+#            EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
+#            
+#            type = ifelse(EG.IsDecoy, "Decoy", "Target"),
+#            Potential.contaminant = ifelse(PG.ProteinGroups%in%accsContam, "+", "-"),
+#            )%>%
+#     as.data.frame()
+#   
+#   
+#   
+#   filenames <- strsplit(df.main$R.FileName, split = '_')
+#   df.main$group <- unlist(lapply(X = filenames,
+#                                  FUN = function(x){return(x[1])}))
+#   
+#   
+#   table(df.main$group)
+#   rabahIdx <- which(df.main$group=='20260331')
+#   df.main$group[rabahIdx] <- paste0('Rabah_', df.main$group[rabahIdx])
+#   df.main$group <- as.factor(df.main$group)
+#   table(df.main$group)
+#   
+#   
+#   df.main$Rep <- unlist(lapply(X = filenames,
+#                                  FUN = function(x){return(x[length(x)])}))
+#   
+#   
+#   saveRDS(df.main, './FilteredCleaned_Spectronaut_Report.RDS')
+#   
+#   rm(accsContam, filenames, rabahIdx)
+#   gc()
+# --------------------------------------
+# ***************************************************
+# ************************
+df.main <- readRDS('./FilteredCleaned_Spectronaut_Report.RDS')
 
-df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
-
-df.main <- df.main %>%
-  filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
-  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
-         EG.IsDecoy = as.logical(toupper(EG.IsDecoy)))%>%
-  as.data.frame()
-
-filenames <- strsplit(df.main$R.FileName, split = '_')
-df.main$group <- unlist(lapply(X = filenames,
-                               FUN = function(x){return(x[1])}))
-
-df.main$Rep <- unlist(lapply(X = filenames,
-                               FUN = function(x){return(x[length(x)])}))
-
-table(df.main$group)
+colnames(df.main)
 ```
 
-    ## 
-    ## 20260331   Group1   Group2   Group3   Group4 
-    ##  5845666  3019665  3019665  3019665  3019665
+    ##  [1] "EG.PrecursorId"        "R.FileName"            "R.Condition"          
+    ##  [4] "R.Replicate"           "FG.Quantity"           "PEP.StrippedSequence" 
+    ##  [7] "PG.ProteinGroups"      "EG.PEP"                "EG.Cscore"            
+    ## [10] "EG.IsDecoy"            "SampleID"              "type"                 
+    ## [13] "Potential.contaminant" "group"                 "Rep"
 
 ``` r
-rabahIdx <- which(df.main$group=='20260331')
-df.main$group[rabahIdx] <- paste0('Rabah_', df.main$group[rabahIdx])
-table(df.main$group)
-```
-
-    ## 
-    ##         Group1         Group2         Group3         Group4 Rabah_20260331 
-    ##        3019665        3019665        3019665        3019665        5845666
-
-``` r
-rm(filenames, rabahIdx)
 gc()
 ```
 
     ##             used   (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  47408582 2531.9  135976904 7262.0 100271380 5355.1
-    ## Vcells 425958814 3249.9  863018271 6584.4 863018267 6584.4
+    ## Ncells   7600496  406.0   11606801  619.9   8936922  477.3
+    ## Vcells 265373679 2024.7  358917448 2738.4 265420392 2025.0
 
 ``` r
-colnames(df.main)
+# ************************
+# ***************************************************
 ```
 
-    ##  [1] "EG.PrecursorId"       "R.FileName"           "R.Condition"         
-    ##  [4] "R.Replicate"          "FG.Quantity"          "PEP.StrippedSequence"
-    ##  [7] "PG.ProteinGroups"     "EG.PEP"               "EG.Cscore"           
-    ## [10] "EG.IsDecoy"           "SampleID"             "group"               
-    ## [13] "Rep"
+# Nr peptides
 
 ``` r
 metaData <- df.main %>%
@@ -81,13 +132,8 @@ metaData <- df.main %>%
   as.data.frame()
 
 
-write.csv(metaData, 'metaData.csv', row.names=FALSE)
-```
-
-# Nr peptides
-
-``` r
-#  metaData <- read.csv('metaData.csv')
+  write.csv(metaData, 'metaData.csv', row.names=FALSE)
+#   metaData <- read.csv('metaData.csv')
 
 p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
   geom_tile(color = "white", linewidth = 1) +
@@ -117,7 +163,7 @@ p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
 p
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
 
 ``` r
 #  ggsave("HeatMap_NrPEP.png", p, width = 8, height = 5, dpi = 300)
@@ -126,15 +172,6 @@ p
 # Decoy ~ Target
 
 ``` r
-df.main <- df.main %>%
-  mutate(
-  EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
-  EG.Cscore = as.numeric(EG.Cscore),
-  group = as.factor(group),
-  type = ifelse(EG.IsDecoy, "Decoy", "Target")
-  ) %>%
-  as.data.frame()
-
 table(df.main$EG.IsDecoy)
 ```
 
@@ -144,6 +181,7 @@ table(df.main$EG.IsDecoy)
 
 ``` r
 tab <- df.main %>%
+  filter(n() >= 2) %>% # just to make sure
   group_by(R.FileName) %>%
   summarise(
     Nr_Decoy = sum(EG.IsDecoy),
@@ -286,7 +324,7 @@ p <- ggplot(density_data, aes(
 p
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-4-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
 
 ``` r
 # ggsave("Cscore Density.png", p, width = 8, height = 5, dpi = 300)
@@ -295,15 +333,14 @@ gc()
 ```
 
     ##             used   (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  36316937 1939.6  108781524 5809.6 100271380 5355.1
-    ## Vcells 391362133 2985.9  863018271 6584.4 863018267 6584.4
+    ## Ncells   7907985  422.4   11606801  619.9  11606801  619.9
+    ## Vcells 267125680 2038.1  656279280 5007.1 656251537 5006.9
 
 # SE object
 
 ``` r
 quant_wide <- df.main %>%
   select(EG.PrecursorId, R.FileName, FG.Quantity) %>%
-  mutate(FG.Quantity = as.numeric(gsub(",", ".", FG.Quantity))) %>%
   pivot_wider(
     names_from = R.FileName,
     values_from = FG.Quantity,
@@ -332,10 +369,9 @@ row_data <- df.main %>%
     Proteins = PG.ProteinGroups,
     PEP = EG.PEP,
     Score = EG.Cscore,
+    Potential.contaminant,
     IsDecoy = EG.IsDecoy
   ) %>%
-  mutate(
-    PEP = as.numeric(gsub(",", ".", PEP))) %>%
   group_by(EG.PrecursorId) %>%
   dplyr::slice(1) %>% # Take the metadata from the first appearance of the precursor
   ungroup() %>%
@@ -771,13 +807,15 @@ anyNA(assay(spectronaut_se))
     ## [1] TRUE
 
 ``` r
+saveRDS(spectronaut_se, 'spectronaut_se.RDS')
+
 rm(df.main, quant_wide, row_data, col_data, quant_matrix)
 gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7894965 421.7   83569811 4463.2 130577828 6973.7
-    ## Vcells 67457369 514.7  690414617 5267.5 863018271 6584.4
+    ## Ncells  7868031 420.2   73376636 3918.8  91720794 4898.5
+    ## Vcells 34258382 261.4  525023424 4005.7 656279263 5007.1
 
 # Missing Values
 
@@ -808,7 +846,7 @@ p_na <- ggplot(na_df, aes(x = SampleID, y = Missing_Count)) +
 p_na
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ``` r
 # Optional: Save it just like your other plots
@@ -819,8 +857,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7930252 423.6   66855849 3570.5 130577828 6973.7
-    ## Vcells 67552316 515.4  552331694 4214.0 863018271 6584.4
+    ## Ncells  7903308 422.1   58701309 3135.0  91720794 4898.5
+    ## Vcells 34353282 262.1  420018740 3204.5 656279263 5007.1
 
 # Imputation
 
@@ -916,14 +954,21 @@ plot(density(na.omit(log2(assay(se2)))), main = "MinDet")
 plot(density(na.omit(log2(assay(se3)+1))), main = "zero")
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 ``` r
 par(mfrow = c(1, 1))
 #  dev.off()
 
 #  knitr::include_graphics("imputation_comparison.png")
+
+rm(se1, se2, se3)
+gc()
 ```
+
+    ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
+    ## Ncells  7887081 421.3   30055072 1605.2  91720794 4898.5
+    ## Vcells 34307939 261.8  337043574 2571.5 656279263 5007.1
 
 # QF object
 
@@ -931,35 +976,26 @@ par(mfrow = c(1, 1))
 # --------------------------------------
 # ------- knn was selected -----------------
 # -----------------------------------
-
+set.seed(123)
 # ***************************************************************
 # ---------------------------------------------------------
-spectronaut_qf <- QFeatures(list(
-  peptides_raw = spectronaut_se,
-  peptides_knn = se1              
-))
+spectronaut_qf <- QFeatures(list(peptides_raw = spectronaut_se))
+colData(spectronaut_qf) <- colData(spectronaut_se)
 
-# -----------------------------------------------------
-rm(se1, se2, se3)
-gc()
+
+invisible(capture.output({
+  spectronaut_qf <- impute(
+  spectronaut_qf, 
+  i = "peptides_raw", 
+  name = "peptides_knn", 
+  method = "knn"
+  )
+}))
 ```
 
-    ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7926015 423.3   42787744 2285.2 130577828 6973.7
-    ## Vcells 84431908 644.2  442205588 3373.8 863018271 6584.4
+    ## Imputing along margin 1 (features/rows).
 
 ``` r
-# -----------------------------------------------------
-
-
-colData(spectronaut_qf) <- colData(spectronaut_qf[[1]])
-
-is_contam <- grepl("CON_", rowData(spectronaut_qf[["peptides_raw"]])$Proteins)
-rowData(spectronaut_qf[["peptides_raw"]])$Potential.contaminant <- ifelse(is_contam, "+", "")
-
-is_contam <- grepl("CON_", rowData(spectronaut_qf[["peptides_knn"]])$Proteins)
-rowData(spectronaut_qf[["peptides_knn"]])$Potential.contaminant <- ifelse(is_contam, "+", "")
-
 table(rowData(spectronaut_qf[["peptides_raw"]])$IsDecoy)
 ```
 
@@ -972,8 +1008,8 @@ table(rowData(spectronaut_qf[["peptides_raw"]])$Potential.contaminant)
 ```
 
     ## 
-    ##        
-    ## 201310
+    ##      -      + 
+    ## 200837    473
 
 ``` r
 table(rowData(spectronaut_qf[["peptides_knn"]])$IsDecoy)
@@ -988,13 +1024,13 @@ table(rowData(spectronaut_qf[["peptides_knn"]])$Potential.contaminant)
 ```
 
     ## 
-    ##        
-    ## 201310
+    ##      -      + 
+    ## 200837    473
 
 ``` r
 spectronaut_filtered <- spectronaut_qf |>
   filterFeatures(~ IsDecoy == "FALSE" | IsDecoy == FALSE) |> 
-  filterFeatures(~ Potential.contaminant != "+") |>  # Remove Contaminants (adjust "CON_" if necessary)
+  filterFeatures(~ Potential.contaminant != "+") |> 
   filterFeatures(~ PEP < 0.05)
 ```
 
@@ -1014,13 +1050,24 @@ dim(spectronaut_se)
 dim(spectronaut_filtered[["peptides_raw"]])
 ```
 
-    ## [1] 109085     84
+    ## [1] 108812     84
 
 ``` r
 dim(spectronaut_filtered[["peptides_knn"]])
 ```
 
-    ## [1] 109085     84
+    ## [1] 108812     84
+
+``` r
+message("Number of proteins are: \nBefore filtering: ",
+        length(unique(rowData(spectronaut_qf[["peptides_raw"]])$Proteins)),
+        "\nAfter filtering: ",
+        length(unique(rowData(spectronaut_filtered[["peptides_raw"]])$Proteins)))
+```
+
+    ## Number of proteins are: 
+    ## Before filtering: 8032
+    ## After filtering: 7562
 
 ``` r
 rm(spectronaut_se, spectronaut_qf)
@@ -1028,8 +1075,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7786610 415.9   34230196 1828.1 130577828 6973.7
-    ## Vcells 68773746 524.8  353764471 2699.1 863018271 6584.4
+    ## Ncells  7760280 414.5   24044058 1284.1  91720794 4898.5
+    ## Vcells 35811686 273.3  219046941 1671.2 656279263 5007.1
 
 # PEP to logNormPEP
 
@@ -1060,13 +1107,13 @@ table(rowData(spectronaut_filtered[['proteins']])$.n)
 
     ## 
     ##   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20 
-    ## 744 637 539 438 398 362 358 300 272 227 212 229 185 190 156 149 136 128 134 114 
+    ## 738 634 537 437 396 361 358 300 271 227 212 226 185 190 154 147 136 127 134 114 
     ##  21  22  23  24  25  26  27  28  29  30  31  32  33  34  35  36  37  38  39  40 
     ## 122  95  98  74  80  84  75  59  64  64  59  39  35  41  42  38  20  27  23  35 
     ##  41  42  43  44  45  46  47  48  49  50  51  52  53  54  55  56  57  58  59  60 
-    ##  25  21  23  15  25  18  20  24  15  18  10  17  10  14  16   9   7  10  16   9 
+    ##  25  21  23  15  24  18  20  24  15  18  10  17  10  14  16   9   7  10  16   9 
     ##  61  62  63  64  65  66  67  68  69  70  71  72  73  74  75  76  77  78  79  80 
-    ##   9  10   9   8   7  10   7   6   5   7   4   3  11   1   2   2   3   3   6   3 
+    ##   9  10   9   8   6  10   7   6   5   7   4   3  11   1   2   2   3   3   6   3 
     ##  81  82  83  84  85  86  87  88  90  91  92  93  94 100 102 103 104 105 106 107 
     ##   4   3   1   3   3   2   1   2   1   1   1   2   1   2   1   1   1   2   1   1 
     ## 108 109 110 112 121 123 126 130 140 143 144 146 148 154 155 156 159 160 171 174 
@@ -1112,7 +1159,7 @@ plotDensities(
 )
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ``` r
 layout(1)
@@ -1154,7 +1201,7 @@ p <- ggplot(df, aes(x = colname, y = value, group = rowname, color = rowname)) +
 p
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
 
 ``` r
 #  ggsave("P03915_GAPDH.png", p, width = 8, height = 5, dpi = 300)
@@ -1164,8 +1211,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7854100 419.5   27384157 1462.5 130577828 6973.7
-    ## Vcells 88954245 678.7  283011577 2159.3 863018271 6584.4
+    ## Ncells  7825450 418.0   24044058 1284.1  91720794 4898.5
+    ## Vcells 55977820 427.1  175237553 1337.0 656279263 5007.1
 
 # quantile and vsn
 
@@ -1210,12 +1257,12 @@ spectronaut_filtered <- normalize(
 plot(spectronaut_filtered)
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
 
 ``` r
 #  dev.off()
 
-#  save(spectronaut_filtered, file = 'spectronaut_filtered.RData')
+saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
 
 #  knitr::include_graphics("QFeatures_Assay_Topology(Data_Processing_Tree).png")
 
@@ -1267,7 +1314,7 @@ p_box <- ggplot(df_boxplots, aes(x = Sample, y = Intensity, fill = Method)) +
 p_box
 ```
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
 
 ``` r
 #  ggsave("comparison_of_normalized_methods_ggplot.png", p_box, width = 12, height = 6, dpi = 300)
@@ -1276,11 +1323,11 @@ rm(df_boxplots)
 gc()
 ```
 
-    ##             used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells   8164423 436.1   27384157 1462.5 130577828 6973.7
-    ## Vcells 124334909 948.7  283011577 2159.3 863018271 6584.4
+    ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
+    ## Ncells  8135586 434.5   24044058 1284.1  91720794 4898.5
+    ## Vcells 91256737 696.3  199886421 1525.1 656279263 5007.1
 
-# PCA 1
+# PCA
 
 ``` r
 # --------------------------------------
@@ -1292,14 +1339,8 @@ gc()
 # --------------------------------------------------------
 mat <- assay(spectronaut_filtered[["proteins2"]])
 
-mat_complete <- mat[rowSums(is.na(mat)) == 0, ]
+mat_complete <- mat[rowSums(is.na(mat)) == 0, ] # just to make sure
 
-message("Number of proteins used for PCA: ", nrow(mat_complete))
-```
-
-    ## Number of proteins used for PCA: 7588
-
-``` r
 mat_transposed <- t(mat_complete)
 
 pca_result <- prcomp(mat_transposed, scale. = TRUE)
@@ -1309,9 +1350,9 @@ rm(mat, mat_complete, mat_transposed)
 gc()
 ```
 
-    ##             used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells   8053874 430.2   21907326 1170.0 130577828 6973.7
-    ## Vcells 123634253 943.3  283011577 2159.3 863018271 6584.4
+    ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
+    ## Ncells  8024930 428.6   24044058 1284.1  91720794 4898.5
+    ## Vcells 90557482 690.9  199886421 1525.1 656279263 5007.1
 
 ``` r
 # ------------------------------------
@@ -1343,10 +1384,10 @@ p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.Fi
 p_cond
 ```
 
-    ## Warning: ggrepel: 73 unlabeled data points (too many overlaps). Consider
+    ## Warning: ggrepel: 8 unlabeled data points (too many overlaps). Consider
     ## increasing max.overlaps
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-14-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
 
 ``` r
 #  ggsave("PCA_cond.png", p, width = 8, height = 5, dpi = 300)
@@ -1372,16 +1413,16 @@ p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName))
 p_gr
 ```
 
-    ## Warning: ggrepel: 73 unlabeled data points (too many overlaps). Consider
+    ## Warning: ggrepel: 6 unlabeled data points (too many overlaps). Consider
     ## increasing max.overlaps
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-14-2.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-2.png)<!-- -->
 
 ``` r
 #  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
 ```
 
-# PCA 2
+# PCA (removing batch effect)
 
 ``` r
 mat <- assay(spectronaut_filtered[["proteins2"]])
@@ -1422,10 +1463,10 @@ p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.Fi
 p_cond
 ```
 
-    ## Warning: ggrepel: 69 unlabeled data points (too many overlaps). Consider
+    ## Warning: ggrepel: 20 unlabeled data points (too many overlaps). Consider
     ## increasing max.overlaps
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
 
 ``` r
 p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
@@ -1447,7 +1488,109 @@ p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName))
 p_gr
 ```
 
-    ## Warning: ggrepel: 69 unlabeled data points (too many overlaps). Consider
+    ## Warning: ggrepel: 20 unlabeled data points (too many overlaps). Consider
     ## increasing max.overlaps
 
-![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-2.png)<!-- -->
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-16-2.png)<!-- -->
+
+# DE analysis
+
+``` r
+spectronaut_filtered <- readRDS('spectronaut_filtered.RDS')
+
+mat <- assay(spectronaut_filtered[["proteins2"]])
+metadata <- as.data.frame(colData(spectronaut_filtered))
+
+metadata$Safe.Condition <- make.names(metadata$R.Condition)
+
+design <- model.matrix(~ 0 + Safe.Condition + group, data = metadata)
+
+colnames(design) <- gsub("Safe.Condition", "", colnames(design))
+
+fit <- lmFit(mat, design)
+
+contrasts <- makeContrasts(
+  # Baseline Knockout Effect (What does losing c-jun do normally?)
+  KO_vs_CTRL = c.jun_KO - CTRL,
+  
+  # cDDP Effect on Wildtype Cells
+  CTRL_cDDP_06h_vs_CTRL = CTRL_cDDP_06h - CTRL,
+  CTRL_cDDP_24h_vs_CTRL = CTRL_cDDP_24h - CTRL,
+  
+  # cDDP Effect on Knockout Cells (Isolating the drug response in KO)
+  KO_cDDP_06h_vs_KO = c.jun_KO_cDDP_06h - c.jun_KO,
+  KO_cDDP_24h_vs_KO = c.jun_KO_cDDP_24h - c.jun_KO,
+  KO_Time_Progression = c.jun_KO_cDDP_24h - c.jun_KO_cDDP_06h,
+  
+  # Inhibitor Effect on Wildtype Cells
+  Inhibitor_06h_vs_CTRL = CTRL_JNK.IN.8_cDDP_06h - CTRL,
+  Inhibitor_24h_vs_CTRL = CTRL_JNK.IN.8_cDDP_24h - CTRL,
+  Inhibitor_Time_Progression = CTRL_JNK.IN.8_cDDP_24h - CTRL_JNK.IN.8_cDDP_06h,
+  
+  # Chemical Inhibition vs Genetic Ablation (The ultimate specificity test)
+  Inhibitor_vs_KO_06h = CTRL_JNK.IN.8_cDDP_06h - c.jun_KO_cDDP_06h,
+  Inhibitor_vs_KO_24h = CTRL_JNK.IN.8_cDDP_24h - c.jun_KO_cDDP_24h,
+  
+  levels = design
+)
+
+fit2 <- contrasts.fit(fit, contrasts)
+fit2 <- eBayes(fit2)
+
+
+results_matrix <- decideTests(fit2, p.value = 0.05)
+
+# Create a binary dataframe for UP-regulated proteins
+# This mathematical trick turns all 1s to 1, and everything else to 0
+up_matrix <- as.data.frame((results_matrix == 1) * 1)
+updep <- grid.grabExpr(
+  print(upset(up_matrix,
+              nsets = 11,             
+              nintersects = 30,       
+              order.by = "freq",      
+              main.bar.color = "red3", 
+              sets.bar.color = "gray30",
+              text.scale = 1.5))
+)
+```
+
+    ## Warning in grabDL(warn, wrap, wrap.grobs, ...): one or more grobs overwritten
+    ## (grab WILL not be faithful; try 'wrap.grobs = TRUE')
+
+``` r
+grid.arrange(updep,
+             vp = viewport(x = 0.42),
+             top = textGrob("Up-regulated proteins", 
+                            #x = 0.62, just = "center",
+                            gp = gpar(fontsize = 18, fontface = "bold")))
+```
+
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-17-1.png)<!-- -->
+
+``` r
+# 2. Create a binary dataframe for DOWN-regulated proteins
+# This turns all -1s to 1 (meaning "yes, it is down-regulated"), and everything else to 0
+down_matrix <- as.data.frame((results_matrix == -1) * 1)
+downplot <- grid.grabExpr(
+  print(upset(down_matrix,
+              nsets = 11,             
+              nintersects = 30,       
+              order.by = "freq",      
+              main.bar.color = "blue", 
+              sets.bar.color = "gray30",
+              text.scale = 1.5))
+)
+```
+
+    ## Warning in grabDL(warn, wrap, wrap.grobs, ...): one or more grobs overwritten
+    ## (grab WILL not be faithful; try 'wrap.grobs = TRUE')
+
+``` r
+grid.arrange(downplot,
+             vp = viewport(x = 0.42),
+             top = textGrob("Down-regulated proteins", 
+                            #x = 0.62, just = "center",
+                            gp = gpar(fontsize = 18, fontface = "bold")))
+```
+
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-17-2.png)<!-- -->
