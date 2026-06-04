@@ -30,7 +30,8 @@ df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
 
 df.main <- df.main %>%
   filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
-  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"))%>%
+  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
+         EG.IsDecoy = as.logical(toupper(EG.IsDecoy)))%>%
   as.data.frame()
 
 filenames <- strsplit(df.main$R.FileName, split = '_')
@@ -49,12 +50,7 @@ rm(filenames, rabahIdx)
 gc()
 colnames(df.main)
 
-```
 
-
-# Nr peptides
-
-```{r}
 metaData <- df.main %>%
   select(R.FileName, SampleID, R.Condition, group, Rep) %>%
   group_by(R.FileName, Rep)%>%
@@ -63,6 +59,15 @@ metaData <- df.main %>%
   as.data.frame()
 
 
+write.csv(metaData, 'metaData.csv', row.names=FALSE)
+```
+
+
+# Nr peptides
+
+```{r}
+
+#  metaData <- read.csv('metaData.csv')
 
 p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
   geom_tile(color = "white", linewidth = 1) +
@@ -88,7 +93,10 @@ p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
     x = "Sample",
     fill = "NrPEP"
   )
-#  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
+
+p
+
+#  ggsave("HeatMap_NrPEP.png", p, width = 8, height = 5, dpi = 300)
 
 ```
 
@@ -98,7 +106,6 @@ p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
 df.main <- df.main %>%
   mutate(
   EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
-  EG.IsDecoy = as.logical(toupper(EG.IsDecoy)),
   EG.Cscore = as.numeric(EG.Cscore),
   group = as.factor(group),
   type = ifelse(EG.IsDecoy, "Decoy", "Target")
@@ -252,7 +259,7 @@ p_na
 # ggsave("missing_values_per_sample.png", p_na, width = 10, height = 6, dpi = 300)
 
 rm(na_df)
-gc
+gc()
 ```
 
 # Imputation
@@ -483,6 +490,7 @@ plot(spectronaut_filtered)
 
 #  knitr::include_graphics("QFeatures_Assay_Topology(Data_Processing_Tree).png")
 
+# saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
 ```
 
 
@@ -536,7 +544,7 @@ rm(df_boxplots)
 gc()
 ```
 
-# PCA
+# PCA 1
 
 ```{r}
 # --------------------------------------
@@ -569,11 +577,11 @@ pca_df <- as.data.frame(pca_result$x[,1:4]) %>%
   mutate(R.FileName = rownames(.)) %>%
   left_join(as.data.frame(colData(spectronaut_filtered)), by = "R.FileName")
 
-p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
+p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_text_repel(size = 3, show.legend = FALSE) + 
   labs(
-    title = "Principal Component Analysis (PCA)",
+    title = "PCA (Before removing the batch effect)",
     subtitle = "Based on Quantile-Normalized Protein Intensities",
     x = paste0("PC1 (", pc1_var, "% Variance)"),
     y = paste0("PC2 (", pc2_var, "% Variance)")
@@ -585,17 +593,17 @@ p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileNam
   )
 
 
-p
+p_cond
 
 #  ggsave("PCA_cond.png", p, width = 8, height = 5, dpi = 300)
 
 
 
-p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
+p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_text_repel(size = 3, show.legend = FALSE) + 
   labs(
-    title = "Principal Component Analysis (PCA)",
+    title = "PCA (Before removing the batch effect)",
     subtitle = "Based on Quantile-Normalized Protein Intensities",
     x = paste0("PC1 (", pc1_var, "% Variance)"),
     y = paste0("PC2 (", pc2_var, "% Variance)")
@@ -607,9 +615,72 @@ p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
   )
 
 
-p
+p_gr
 
 #  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
 
+```
+
+
+# PCA 2
+
+```{r}
+
+mat <- assay(spectronaut_filtered[["proteins2"]])
+mat_complete <- mat[rowSums(is.na(mat)) == 0, ]
+
+batch_labels <- colData(spectronaut_filtered)[colnames(mat_complete), "group"]
+
+mat_corrected <- removeBatchEffect(mat_complete, batch = batch_labels)
+
+mat_transposed <- t(mat_corrected)
+pca_result <- prcomp(mat_transposed, scale. = TRUE)
+
+var_explained <- (pca_result$sdev^2) / sum(pca_result$sdev^2) * 100
+pc1_var <- round(var_explained[1], 1)
+pc2_var <- round(var_explained[2], 1)
+
+pca_df <- as.data.frame(pca_result$x[,1:4]) %>%
+  mutate(R.FileName = rownames(.)) %>%
+  left_join(as.data.frame(colData(spectronaut_filtered)), by = "R.FileName")
+
+p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  labs(
+    title = "PCA (After removing the batch effect)",
+    subtitle = "Batch-Corrected Quantile-Normalized Intensities",
+    x = paste0("PC1 (", pc1_var, "% Variance)"),
+    y = paste0("PC2 (", pc2_var, "% Variance)")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+
+
+
+p_cond
+
+
+
+p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  labs(
+    title = "PCA (After removing the batch effect)",
+    subtitle = "Batch-Corrected Quantile-Normalized Intensities",
+    x = paste0("PC1 (", pc1_var, "% Variance)"),
+    y = paste0("PC2 (", pc2_var, "% Variance)")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+
+
+p_gr
 ```
 

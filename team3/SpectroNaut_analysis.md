@@ -25,7 +25,8 @@ df.main <- fread("./20260524/Filtered_Spectronaut_Report.tsv")
 
 df.main <- df.main %>%
   filter(!R.FileName%in%c("R.FileName", "Centroid"))%>%
-  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"))%>%
+  mutate(SampleID = str_remove(R.FileName, "_[^_]*$"),
+         EG.IsDecoy = as.logical(toupper(EG.IsDecoy)))%>%
   as.data.frame()
 
 filenames <- strsplit(df.main$R.FileName, split = '_')
@@ -58,8 +59,8 @@ gc()
 ```
 
     ##             used   (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  47408418 2531.9  135977593 7262.0 100271738 5355.1
-    ## Vcells 434920396 3318.2  868138428 6623.4 868138426 6623.4
+    ## Ncells  47408558 2531.9  135976959 7262.0 100271401 5355.1
+    ## Vcells 425958712 3249.9  863018096 6584.4 863018093 6584.4
 
 ``` r
 colnames(df.main)
@@ -71,8 +72,6 @@ colnames(df.main)
     ## [10] "EG.IsDecoy"           "SampleID"             "group"               
     ## [13] "Rep"
 
-# Nr peptides
-
 ``` r
 metaData <- df.main %>%
   select(R.FileName, SampleID, R.Condition, group, Rep) %>%
@@ -82,6 +81,13 @@ metaData <- df.main %>%
   as.data.frame()
 
 
+write.csv(metaData, 'metaData.csv', row.names=FALSE)
+```
+
+# Nr peptides
+
+``` r
+#  metaData <- read.csv('metaData.csv')
 
 p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
   geom_tile(color = "white", linewidth = 1) +
@@ -107,7 +113,14 @@ p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
     x = "Sample",
     fill = "NrPEP"
   )
-#  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
+
+p
+```
+
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+
+``` r
+#  ggsave("HeatMap_NrPEP.png", p, width = 8, height = 5, dpi = 300)
 ```
 
 # Decoy ~ Target
@@ -116,7 +129,6 @@ p <- ggplot(metaData, aes(y = Rep, x = SampleID, fill = NrPEP)) +
 df.main <- df.main %>%
   mutate(
   EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
-  EG.IsDecoy = as.logical(toupper(EG.IsDecoy)),
   EG.Cscore = as.numeric(EG.Cscore),
   group = as.factor(group),
   type = ifelse(EG.IsDecoy, "Decoy", "Target")
@@ -283,8 +295,8 @@ gc()
 ```
 
     ##             used   (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  36307206 1939.1  108782075 5809.6 100271738 5355.1
-    ## Vcells 391340350 2985.7  868138428 6623.4 868138426 6623.4
+    ## Ncells  36316913 1939.6  108781568 5809.6 100271401 5355.1
+    ## Vcells 391362025 2985.9  863018096 6584.4 863018093 6584.4
 
 # SE object
 
@@ -764,8 +776,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7888688 421.4  104462792 5579.0 130578490 6973.7
-    ## Vcells 67443811 514.6  694510743 5298.7 868138428 6623.4
+    ## Ncells  7894941 421.7   83569844 4463.2 130577881 6973.7
+    ## Vcells 67457267 514.7  690414477 5267.5 863018096 6584.4
 
 # Missing Values
 
@@ -803,21 +815,12 @@ p_na
 # ggsave("missing_values_per_sample.png", p_na, width = 10, height = 6, dpi = 300)
 
 rm(na_df)
-gc
+gc()
 ```
 
-    ## function (verbose = getOption("verbose"), reset = FALSE, full = TRUE) 
-    ## {
-    ##     res <- .Internal(gc(verbose, reset, full))
-    ##     res <- matrix(res, 2L, 7L, dimnames = list(c("Ncells", "Vcells"), 
-    ##         c("used", "(Mb)", "gc trigger", "(Mb)", "limit (Mb)", 
-    ##             "max used", "(Mb)")))
-    ##     if (all(is.na(res[, 5L]))) 
-    ##         res[, -5L]
-    ##     else res
-    ## }
-    ## <bytecode: 0x55d3b4cdd800>
-    ## <environment: namespace:base>
+    ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
+    ## Ncells  7930228 423.6   66855876 3570.5 130577881 6973.7
+    ## Vcells 67552212 515.4  552331582 4214.0 863018096 6584.4
 
 # Imputation
 
@@ -942,8 +945,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7922776 423.2   66856188 3570.6 130578490 6973.7
-    ## Vcells 84424298 644.2  444486876 3391.2 868138428 6623.4
+    ## Ncells  7925991 423.3   42787761 2285.2 130577881 6973.7
+    ## Vcells 84431806 644.2  442205505 3373.8 863018096 6584.4
 
 ``` r
 # -----------------------------------------------------
@@ -1025,8 +1028,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7783374 415.7   53484951 2856.5 130578490 6973.7
-    ## Vcells 68766141 524.7  355589501 2713.0 868138428 6623.4
+    ## Ncells  7786586 415.9   34230209 1828.1 130577881 6973.7
+    ## Vcells 68773644 524.8  353764404 2699.1 863018096 6584.4
 
 # PEP to logNormPEP
 
@@ -1161,8 +1164,8 @@ gc()
 ```
 
     ##            used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells  7850867 419.3   42787961 2285.2 130578490 6973.7
-    ## Vcells 88946632 678.7  284471601 2170.4 868138428 6623.4
+    ## Ncells  7854076 419.5   27384168 1462.5 130577881 6973.7
+    ## Vcells 88954133 678.7  283011524 2159.3 863018096 6584.4
 
 # quantile and vsn
 
@@ -1215,6 +1218,8 @@ plot(spectronaut_filtered)
 #  save(spectronaut_filtered, file = 'spectronaut_filtered.RData')
 
 #  knitr::include_graphics("QFeatures_Assay_Topology(Data_Processing_Tree).png")
+
+# saveRDS(spectronaut_filtered, 'spectronaut_filtered.RDS')
 ```
 
 # Comparison of normalization methods
@@ -1272,10 +1277,10 @@ gc()
 ```
 
     ##             used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells   8160946 435.9   34230369 1828.1 130578490 6973.7
-    ## Vcells 124327187 948.6  285251447 2176.3 868138428 6623.4
+    ## Ncells   8164016 436.1   27384168 1462.5 130577881 6973.7
+    ## Vcells 124334347 948.6  283011524 2159.3 863018096 6584.4
 
-# PCA
+# PCA 1
 
 ``` r
 # --------------------------------------
@@ -1305,8 +1310,8 @@ gc()
 ```
 
     ##             used  (Mb) gc trigger   (Mb)  max used   (Mb)
-    ## Ncells   8050392 430.0   27384296 1462.5 130578490 6973.7
-    ## Vcells 123626543 943.2  285251447 2176.3 868138428 6623.4
+    ## Ncells   8053467 430.2   21907335 1170.0 130577881 6973.7
+    ## Vcells 123633701 943.3  283011524 2159.3 863018096 6584.4
 
 ``` r
 # ------------------------------------
@@ -1319,11 +1324,11 @@ pca_df <- as.data.frame(pca_result$x[,1:4]) %>%
   mutate(R.FileName = rownames(.)) %>%
   left_join(as.data.frame(colData(spectronaut_filtered)), by = "R.FileName")
 
-p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
+p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_text_repel(size = 3, show.legend = FALSE) + 
   labs(
-    title = "Principal Component Analysis (PCA)",
+    title = "PCA (Before removing the batch effect)",
     subtitle = "Based on Quantile-Normalized Protein Intensities",
     x = paste0("PC1 (", pc1_var, "% Variance)"),
     y = paste0("PC2 (", pc2_var, "% Variance)")
@@ -1335,7 +1340,7 @@ p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileNam
   )
 
 
-p
+p_cond
 ```
 
     ## Warning: ggrepel: 73 unlabeled data points (too many overlaps). Consider
@@ -1348,11 +1353,11 @@ p
 
 
 
-p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
+p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
   geom_point(size = 3, alpha = 0.7) +
   geom_text_repel(size = 3, show.legend = FALSE) + 
   labs(
-    title = "Principal Component Analysis (PCA)",
+    title = "PCA (Before removing the batch effect)",
     subtitle = "Based on Quantile-Normalized Protein Intensities",
     x = paste0("PC1 (", pc1_var, "% Variance)"),
     y = paste0("PC2 (", pc2_var, "% Variance)")
@@ -1364,7 +1369,7 @@ p <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
   )
 
 
-p
+p_gr
 ```
 
     ## Warning: ggrepel: 73 unlabeled data points (too many overlaps). Consider
@@ -1375,3 +1380,74 @@ p
 ``` r
 #  ggsave("PCA_groups.png", p, width = 8, height = 5, dpi = 300)
 ```
+
+# PCA 2
+
+``` r
+mat <- assay(spectronaut_filtered[["proteins2"]])
+mat_complete <- mat[rowSums(is.na(mat)) == 0, ]
+
+batch_labels <- colData(spectronaut_filtered)[colnames(mat_complete), "group"]
+
+mat_corrected <- removeBatchEffect(mat_complete, batch = batch_labels)
+
+mat_transposed <- t(mat_corrected)
+pca_result <- prcomp(mat_transposed, scale. = TRUE)
+
+var_explained <- (pca_result$sdev^2) / sum(pca_result$sdev^2) * 100
+pc1_var <- round(var_explained[1], 1)
+pc2_var <- round(var_explained[2], 1)
+
+pca_df <- as.data.frame(pca_result$x[,1:4]) %>%
+  mutate(R.FileName = rownames(.)) %>%
+  left_join(as.data.frame(colData(spectronaut_filtered)), by = "R.FileName")
+
+p_cond <- ggplot(pca_df, aes(x = PC1, y = PC2, color = R.Condition, label = R.FileName)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  labs(
+    title = "PCA (After removing the batch effect)",
+    subtitle = "Batch-Corrected Quantile-Normalized Intensities",
+    x = paste0("PC1 (", pc1_var, "% Variance)"),
+    y = paste0("PC2 (", pc2_var, "% Variance)")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+
+
+
+p_cond
+```
+
+    ## Warning: ggrepel: 69 unlabeled data points (too many overlaps). Consider
+    ## increasing max.overlaps
+
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
+
+``` r
+p_gr <- ggplot(pca_df, aes(x = PC1, y = PC2, color = group, label = R.FileName)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text_repel(size = 3, show.legend = FALSE) + 
+  labs(
+    title = "PCA (After removing the batch effect)",
+    subtitle = "Batch-Corrected Quantile-Normalized Intensities",
+    x = paste0("PC1 (", pc1_var, "% Variance)"),
+    y = paste0("PC2 (", pc2_var, "% Variance)")
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold")
+  )
+
+
+p_gr
+```
+
+    ## Warning: ggrepel: 69 unlabeled data points (too many overlaps). Consider
+    ## increasing max.overlaps
+
+![](SpectroNaut_analysis_files/figure-gfm/unnamed-chunk-15-2.png)<!-- -->
