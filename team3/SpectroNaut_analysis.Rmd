@@ -65,7 +65,7 @@ write.csv(metaData, 'metaData.csv', row.names=FALSE)
 
 # Nr peptides
 
-```{r}
+```{r fig.width=15, fig.height=7, dpi=300}
 
 #  metaData <- read.csv('metaData.csv')
 
@@ -102,7 +102,7 @@ p
 
 # Decoy ~ Target
 
-```{r}
+```{r fig.width=15, fig.height=13, dpi=300}
 df.main <- df.main %>%
   mutate(
   EG.Cscore = as.numeric(gsub(",", ".", EG.Cscore)),
@@ -229,7 +229,7 @@ gc()
 
 # Missing Values
 
-```{r}
+```{r fig.width=15, fig.height=9, dpi=300}
 na_df <- data.frame(
   Sample = colnames(spectronaut_se), 
   Missing_Count = nNA(spectronaut_se)$nNAcols$nNA
@@ -344,7 +344,7 @@ gc()
 
 # PEP to logNormPEP
 
-```{r}
+```{r fig.width=15, fig.height=13, dpi=300}
 # -------------------------------------------
 # ------ log scale of peptide and apply log normalization
 # -----------------------------------------
@@ -415,7 +415,7 @@ layout(1)
 
 # Housekeeper's intensity
 
-```{r}
+```{r fig.width=15, fig.height=9, dpi=300}
 # plot GAPDH which is a housekeeper
 df <- spectronaut_filtered["P04406", ,
             c("lognorm_peptides", "proteins")] |>
@@ -496,7 +496,7 @@ plot(spectronaut_filtered)
 
 # Comparison of normalization methods
 
-```{r}
+```{r fig.width=15, fig.height=9, dpi=300}
 df_median <- as.data.frame(assay(spectronaut_filtered[["proteins"]])) %>%
   pivot_longer(cols = everything(), names_to = "Sample", values_to = "Intensity") %>%
   mutate(Method = "Median Centered")
