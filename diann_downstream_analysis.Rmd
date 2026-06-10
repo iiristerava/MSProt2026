@@ -1,0 +1,790 @@
+---
+title: "dia_nn_downstream_analysis"
+output: html_document
+date: "2026-06-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(limpa)
+library(readxl)
+library(pheatmap)
+library(EnhancedVolcano)
+library(STRINGdb)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(arrow)
+library(rpx)
+library(dplyr)
+library(stringr)
+```
+```{r}
+y.peptide <- readDIANN(file='/Users/mikhaila/Desktop/MSProt2026/team2/transfer_421909_files_47374ab3/report.parquet',format="parquet",
+                       q.columns = c("Q.Value","Lib.Q.Value","Lib.PG.Q.Value"),
+                       q.cutoffs = 0.01)
+```
+```{r}
+head(y.peptide$E)
+head(y.peptide$genes)
+```
+```{r}
+# 1. Get the sample file names directly from your loaded peptide matrix
+sample_names <- colnames(y.peptide$E)
+
+# 2. Build the annotation dataframe using dplyr and stringr
+samples_stool <- data.frame(File.Name = sample_names) %>%
+  mutate(
+    # Clean up the name by removing the long folder path and ".raw"
+    Sample_ID = basename(File.Name) %>% str_remove(".raw"),
+    
+    # Extract Genotype: If it contains 'c-jun_KO', label it, otherwise 'CTRL'
+    Genotype = ifelse(str_detect(Sample_ID, "c-jun_KO"), "c-jun_KO", "CTRL"),
+    
+    # Extract Treatment based on keywords in the file name
+    Treatment = case_when(
+      str_detect(Sample_ID, "JNK-IN-8") ~ "JNK-IN-8 + cDDP",
+      str_detect(Sample_ID, "cDDP")     ~ "cDDP",
+      TRUE                              ~ "Untreated"
+    ),
+    
+    # Extract Timepoint based on keywords
+    Timepoint = case_when(
+      str_detect(Sample_ID, "06h") ~ "6h",
+      str_detect(Sample_ID, "24h") ~ "24h",
+      TRUE                         ~ "0h"
+    )
+  )
+
+# 3. Check your newly created metadata table!
+head(samples_stool)
+```
+
+```{r}
+# 1. Set the row names of your metadata to match the file names (limma prefers this)
+rownames(samples_stool) <- samples_stool$File.Name
+
+# 2. Inject your specific experimental metadata into the limma EList object
+y.peptide$targets <- samples_stool[, c("Genotype", "Treatment", "Timepoint")]
+```
+
+
+Quality filtering
+After reading in the data, it is common to conduct additional filtering to improve the quality of your data and assist with downstream interpretation of results.
+
+Filtering out non-proteotypic peptides: Removes peptides that belong to more than one protein.
+Filtering out compound proteins: Removes peptides belonging to compound protein groups consisting of multiple proteins separated by “;” delimiters.
+Filtering out singleton peptides: Removes peptides that are the only peptide belonging to that protein (i.e. keeps only proteins with multiple peptides).
+
+
+```{r}
+y.peptide <- filterNonProteotypicPeptides(y.peptide)
+y.peptide <- filterCompoundProteins(y.peptide)
+y.peptide <- filterSingletonPeptides(y.peptide, min.n.peptides = 2)
+```
+
+
+```{r}
+# --- MISSING VALUE FILTERING (30% Global Rule) ---
+# 1. Calculate the 30% threshold based on the total number of samples
+total_samples <- ncol(y.peptide$E)
+min_samples <- round(0.20 * total_samples)
+
+# 2. Count how many valid (non-NA) numbers exist in each row (peptide)
+valid_values_per_peptide <- rowSums(!is.na(y.peptide$E))
+
+# 3. Print out exactly what is happening so you have it for your records
+peptides_to_drop <- sum(valid_values_per_peptide < min_samples)
+print(paste("Total samples:", total_samples, "| 20% threshold is:", min_samples, "samples."))
+print(paste("Filtering out", peptides_to_drop, "peptides due to too many missing values!"))
+
+# 4. Filter the limma EList
+y.peptide <- y.peptide[valid_values_per_peptide >= min_samples, ]
+```
+
+
+```{r}
+# 1. Read the FASTA file directly into R as text
+fasta_file <- "/Users/mikhaila/Desktop/MSProt2026/team2/transfer_421909_files_47374ab3/contaminants.fasta"
+fasta_lines <- readLines(fasta_file)
+
+# 2. Extract and clean the headers to get pure IDs
+headers <- fasta_lines[str_detect(fasta_lines, "^>")]
+contam_ids <- headers %>% 
+  str_remove("^>") %>%              
+  word(1) %>%                       
+  str_remove("^(sp|tr|CON_)\\|") %>% 
+  str_remove("\\|.*$")              
+
+# 3. Create the search pattern
+search_pattern <- paste(contam_ids, collapse = "|")
+
+# 4. Count and print how many will be filtered out BEFORE we remove them
+num_contaminants <- sum(str_detect(y.peptide$genes$Protein.Group, search_pattern), na.rm = TRUE)
+print(paste("Successfully filtered out", num_contaminants, "contaminant peptides!"))
+
+# 5. Filter your genes dataframe to remove those rows
+y.peptide$genes <- y.peptide$genes %>% 
+  filter(!str_detect(Protein.Group, search_pattern))
+
+# 6. Match peptides in the matrix to only those remaining in the dataframe
+y.peptide$E <- y.peptide$E[rownames(y.peptide$genes), ]
+```
+
+
+```{r}
+# Class visualisation by Genotype
+plotMDS(y.peptide, pch=16, col=as.character(Genotype.color), main="MDS Plot: Genotype")
+```
+
+
+```{r}
+# Visualisation by Treatment
+plotMDS(y.peptide, pch=16, col=as.character(Treatment.color), main="MDS Plot: Treatment")
+```
+
+```{r}
+# 1. Factorise and set colors for Genotype
+Genotype <- factor(y.peptide$targets$Genotype)
+Genotype.color <- Genotype
+# Using the 'cividis' colorblind-friendly palette for the genotypes
+levels(Genotype.color) <- hcl.colors(nlevels(Genotype), palette = "cividis")
+
+# 2. Factorise and set colors for Treatment
+Treatment <- factor(y.peptide$targets$Treatment)
+Treatment.color <- Treatment
+# Using 'Set 2' for the different drug treatments
+levels(Treatment.color) <- hcl.colors(nlevels(Treatment), palette = "Set 2")
+
+# 3. Factorise and set colors for Timepoint
+Timepoint <- factor(y.peptide$targets$Timepoint)
+Timepoint.color <- Timepoint
+# Using 'Dark 2' to easily distinguish the 0h, 6h, and 24h timepoints
+levels(Timepoint.color) <- hcl.colors(nlevels(Timepoint), palette = "Dark 2")
+```
+
+
+```{r}
+# 1. Set the reference baselines for your metadata
+y.peptide$targets$Genotype <- relevel(factor(y.peptide$targets$Genotype), ref = "CTRL")
+y.peptide$targets$Treatment <- relevel(factor(y.peptide$targets$Treatment), ref = "Untreated")
+y.peptide$targets$Timepoint <- relevel(factor(y.peptide$targets$Timepoint), ref = "0h")
+```
+```{r}
+# 2. Create the design matrix
+design <- model.matrix(~ Genotype + Treatment + Timepoint, data = y.peptide$targets)
+
+# Take a peek at the first few rows just to make sure it worked
+head(design)
+```
+```{r}
+# 3. Fit the linear model to your quantitative data
+fit <- lmFit(y.peptide$E, design)
+
+# 4. Apply Empirical Bayes to smooth the standard errors (this gives you much better p-values)
+fit <- eBayes(fit)
+
+# 5. Extract your results! 
+# Let's say we want to see the main effect of the c-jun Knockout compared to Control:
+# (The 'coef' name must match the exact column name generated in your 'design' matrix)
+results_genotype <- topTable(fit, coef = "Genotypec-jun_KO", number = Inf, adjust.method = "BH")
+
+# Look at your top significantly changing peptides:
+head(results_genotype)
+```
+
+```{r}
+# Find the ID of the #1 most significant peptide
+top_peptide_id <- rownames(results_genotype)[1]
+# Get the parent protein name for the title
+top_protein_name <- results_genotype$Protein.Group[1] 
+
+# Create a boxplot using your Genotype colors
+boxplot(y.peptide$E[top_peptide_id, ] ~ y.peptide$targets$Genotype,
+        main = paste("Top Peptide belonging to:", top_protein_name),
+        ylab = "Log2 Intensity",
+        xlab = "Genotype",
+        col = levels(Genotype.color))
+```
+```{r}
+# --- 1. PLOTTING A SINGLE PEPTIDE ---
+top_peptide_id <- rownames(results_genotype)[1]
+top_protein_name <- results_genotype$Protein.Group[1] 
+
+boxplot(y.peptide$E[top_peptide_id, ] ~ y.peptide$targets$Genotype,
+        main = paste("Top Peptide belonging to:", top_protein_name),
+        ylab = "Log2 Intensity",
+        xlab = "Genotype",
+        col = levels(Genotype.color))
+
+
+# --- 2. THE HEATMAP (With Imputation Fix!) ---
+# Filter for significant peptides
+sig_results <- results_genotype[results_genotype$adj.P.Val < 0.05, ]
+sig_results <- sig_results[order(abs(sig_results$logFC), decreasing = TRUE), ]
+top50_peptides <- rownames(head(sig_results, n = 50))
+
+# Pull data
+expr_matrix <- y.peptide$E[top50_peptides, ]
+
+# IMPUTATION STEP: Replace NAs with a small background value
+# We use a value slightly lower than the minimum detected intensity in the matrix
+bg_value <- min(expr_matrix, na.rm = TRUE) - 0.5 
+expr_matrix[is.na(expr_matrix)] <- bg_value
+
+# Scale the data and generate the heatmap
+scaled_expr <- t(scale(t(expr_matrix)))
+
+pheatmap(scaled_expr,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE, 
+         show_colnames = FALSE,
+         annotation_col = y.peptide$targets,
+         clustering_method = 'ward.D')
+
+
+# 1. Stitch the Protein.Group labels back into your results table
+# We match them perfectly using the peptide IDs (the rownames)
+results_genotype$Protein.Group <- y.peptide$genes[rownames(results_genotype), "Protein.Group"]
+
+# 1. Grab just the top 15 or 20 most significant protein labels
+top_proteins <- head(results_genotype$Protein.Group, 15)
+
+# 2. Generate the cleaned-up Volcano plot
+EnhancedVolcano(results_genotype,
+                lab = results_genotype$Protein.Group,
+                selectLab = top_proteins,      # <--- THIS IS THE MAGIC FIX
+                x = 'logFC',
+                y = 'adj.P.Val',
+                pCutoff = 0.05,
+                FCcutoff = 1.0,
+                pointSize = 1.5,               # Made the dots a bit smaller so they don't overlap as much
+                labSize = 4.0,                 # Text size
+                drawConnectors = TRUE,
+                widthConnectors = 0.5,
+                max.overlaps = 50,             # Replaced the 'Inf' override
+                title = "c-jun KO vs Control",
+                subtitle = "Peptide-level Differential Expression")
+```
+```{r}
+library(dplyr)
+
+# 1. Bring back the other ID columns from your master list
+results_genotype$Protein.Names <- y.peptide$genes[rownames(results_genotype), "Protein.Names"]
+results_genotype$Genes <- y.peptide$genes[rownames(results_genotype), "Genes"]
+
+# 2. Filter for significance, AND keep only one row per unique protein
+sig_proteins_unique <- results_genotype %>% 
+  filter(adj.P.Val < 0.05) %>% 
+  distinct(Protein.Group, .keep_all = TRUE) # This removes duplicate peptides from the same protein
+
+print(paste("You have", nrow(sig_proteins_unique), "unique significant proteins to analyze!"))
+```
+
+```{r}
+# 1. Initialize the STRING database
+string_db <- STRINGdb$new(version = "11.5", species = 9606, score_threshold = 400)
+
+# 2. Map your unique list to the STRING database using Protein.Names
+mapped <- string_db$map(sig_proteins_unique, "Protein.Names", removeUnmappedRows = TRUE)
+
+# 3. Plot the network! 
+# (Warning: If you have >500 proteins, this plot will look like a hairball. 
+# You might want to filter mapped to the top 100 before plotting if it's too dense)
+string_db$plot_network(mapped$STRING_id)
+```
+```{r}
+# 1. Convert UniProt IDs (Protein.Group) to Entrez IDs
+converted <- bitr(sig_proteins_unique$Protein.Group, 
+                  fromType = "UNIPROT", 
+                  toType = "ENTREZID", 
+                  OrgDb = org.Hs.eg.db)
+
+# --- 2. GO Biological Process Enrichment ---
+ego <- enrichGO(gene = converted$ENTREZID,
+                OrgDb = org.Hs.eg.db,
+                ont = "ALL", # Looks at Biological Process, Cellular Component, and Molecular Function
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                readable = TRUE)
+
+# Show GO plot
+dotplot(ego, showCategory = 10, title = "GO Enrichment")
+
+# --- 3. KEGG Pathway Enrichment ---
+ekegg <- enrichKEGG(gene = converted$ENTREZID,
+                    organism = 'hsa',
+                    pvalueCutoff = 0.05)
+
+# Show KEGG plot
+dotplot(ekegg, showCategory = 10, title = "KEGG Enrichment")
+```
+
+
+Answering the bio questions properly 
+
+```{r}
+y.peptide <- readDIANN(file='/Users/mikhaila/Desktop/MSProt2026/team2/transfer_421909_files_47374ab3/report.parquet',
+                       format="parquet",
+                       q.columns = c("Q.Value","Lib.Q.Value","Lib.PG.Q.Value"),
+                       q.cutoffs = 0.01)
+```
+
+
+```{r}
+# 1. Build Metadata Table
+sample_names <- colnames(y.peptide$E)
+samples_stool <- data.frame(File.Name = sample_names) %>%
+  mutate(
+    Sample_ID = basename(File.Name) %>% str_remove(".raw"),
+    Genotype = ifelse(str_detect(Sample_ID, "c-jun_KO"), "c-jun_KO", "CTRL"),
+    Treatment = case_when(
+      str_detect(Sample_ID, "JNK-IN-8") ~ "JNK-IN-8 + cDDP",
+      str_detect(Sample_ID, "cDDP")     ~ "cDDP",
+      TRUE                              ~ "Untreated"
+    ),
+    Timepoint = case_when(
+      str_detect(Sample_ID, "06h") ~ "6h",
+      str_detect(Sample_ID, "24h") ~ "24h",
+      TRUE                         ~ "0h"
+    )
+  )
+
+# 2. Attach Metadata to limma object
+rownames(samples_stool) <- samples_stool$File.Name
+y.peptide$targets <- samples_stool[, c("Genotype", "Treatment", "Timepoint")]
+```
+
+
+
+```{r}
+# 1. Base Structural Filters
+y.peptide <- filterNonProteotypicPeptides(y.peptide)
+y.peptide <- filterCompoundProteins(y.peptide)
+y.peptide <- filterSingletonPeptides(y.peptide, min.n.peptides = 2)
+
+# 2. Missing Value Filter (30% Global Rule)
+total_samples <- ncol(y.peptide$E)
+min_samples <- round(0.30 * total_samples)
+valid_values_per_peptide <- rowSums(!is.na(y.peptide$E))
+
+peptides_to_drop <- sum(valid_values_per_peptide < min_samples)
+print(paste("Filtering out", peptides_to_drop, "peptides due to too many missing values!"))
+
+y.peptide <- y.peptide[valid_values_per_peptide >= min_samples, ]
+```
+
+
+```{r}
+fasta_file <- "/Users/mikhaila/Desktop/MSProt2026/team2/transfer_421909_files_47374ab3/contaminants.fasta"
+fasta_lines <- readLines(fasta_file)
+headers <- fasta_lines[str_detect(fasta_lines, "^>")]
+
+contam_ids <- headers %>% 
+  str_remove("^>") %>% 
+  word(1) %>% 
+  str_remove("^(sp|tr|CON_)\\|") %>% 
+  str_remove("\\|.*$")              
+
+search_pattern <- paste(contam_ids, collapse = "|")
+y.peptide$genes <- y.peptide$genes %>% filter(!str_detect(Protein.Group, search_pattern))
+y.peptide$E <- y.peptide$E[rownames(y.peptide$genes), ]
+```
+
+```{r}
+# 1. Create a combined Group variable and clean out characters that break R variable names (- and +)
+y.peptide$targets$Group <- paste(y.peptide$targets$Genotype, 
+                                 y.peptide$targets$Treatment, 
+                                 y.peptide$targets$Timepoint, 
+                                 sep = "_") %>%
+  str_replace_all("c-jun_KO", "cjunKO") %>%
+  str_replace_all("JNK-IN-8 \\+ cDDP", "JNKIN8_cDDP")
+
+# 2. Build the Zero-Intercept Design Matrix
+Group <- factor(y.peptide$targets$Group)
+design <- model.matrix(~ 0 + Group)
+colnames(design) <- levels(Group)
+
+# 3. Fit the base model
+fit <- lmFit(y.peptide$E, design)
+
+# 4. Build the Comparisons using the clean, valid column names
+contrasts_matrix <- makeContrasts(
+  Mechanistic_Baseline    = "cjunKO_Untreated_0h - CTRL_Untreated_0h",
+  Mechanistic_Stress      = "cjunKO_cDDP_24h - CTRL_cDDP_24h",
+  Translational_Inhibitor = "CTRL_JNKIN8_cDDP_24h - CTRL_cDDP_24h",
+  Biomarker_Resistance    = "CTRL_cDDP_24h - CTRL_Untreated_0h",
+  levels = design
+)
+
+# 5. Calculate final statistics
+fit_contrasts <- contrasts.fit(fit, contrasts_matrix)
+fit_contrasts = eBayes(fit_contrasts)
+```
+```{r}
+# 1. Extract results
+res_mech_baseline <- topTable(fit_contrasts, coef = "Mechanistic_Baseline", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns
+res_mech_baseline$Protein.Group <- y.peptide$genes[rownames(res_mech_baseline), "Protein.Group"]
+res_mech_baseline$Protein.Names <- y.peptide$genes[rownames(res_mech_baseline), "Protein.Names"]
+
+# 3. Plot
+top_baseline <- head(res_mech_baseline$Protein.Group, 15)
+EnhancedVolcano(res_mech_baseline,
+                lab = res_mech_baseline$Protein.Group,
+                selectLab = top_baseline,
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Mechanistic Topic: c-Jun KO vs Control (Baseline)",
+                subtitle = "Peptide-level changes without treatment (0h)")
+```
+```{r}
+# 1. Extract results
+res_mech_baseline <- topTable(fit_contrasts, coef = "Mechanistic_Baseline", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns 
+res_mech_baseline$Genes <- y.peptide$genes[rownames(res_mech_baseline), "Genes"]
+res_mech_baseline$Protein.Group <- y.peptide$genes[rownames(res_mech_baseline), "Protein.Group"]
+
+# 3. Grab the top 15 UNIQUE gene symbols
+top_baseline <- head(unique(res_mech_baseline$Genes), 15)
+
+# 4. Plot
+EnhancedVolcano(res_mech_baseline,
+                lab = res_mech_baseline$Genes,         
+                selectLab = top_baseline,              
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Mechanistic Topic: c-Jun KO vs Control (Baseline)",
+                subtitle = "Peptide-level changes without treatment (0h)")
+```
+
+
+
+
+```{r}
+# 1. Filter for significant peptides and sort by absolute Log Fold Change
+sig_peptides_baseline <- res_mech_baseline[res_mech_baseline$adj.P.Val < 0.05, ]
+sig_peptides_baseline <- sig_peptides_baseline[order(abs(sig_peptides_baseline$logFC), decreasing = TRUE), ]
+
+if(nrow(sig_peptides_baseline) > 0) {
+  top50_baseline <- rownames(head(sig_peptides_baseline, n = 50))
+  
+  # 2. Isolate only the relevant samples for this comparison
+  samples_baseline <- which(y.peptide$targets$Group %in% c("cjunKO_Untreated_0h", "CTRL_Untreated_0h"))
+  expr_matrix_baseline <- y.peptide$E[top50_baseline, samples_baseline, drop = FALSE]
+  
+  # 3. Impute missing values with background noise
+  bg_baseline <- min(expr_matrix_baseline, na.rm = TRUE) - 0.5
+  expr_matrix_baseline[is.na(expr_matrix_baseline)] <- bg_baseline
+  
+  # 4. Scale rows and plot
+  scaled_baseline <- t(scale(t(expr_matrix_baseline)))
+  pheatmap(scaled_baseline,
+           cluster_rows = TRUE, cluster_cols = TRUE,
+           show_rownames = FALSE, show_colnames = FALSE,
+           annotation_col = y.peptide$targets[samples_baseline, c("Genotype", "Timepoint")],
+           clustering_method = 'ward.D',
+           main = "Heatmap: Mechanistic Baseline (Top 50 DE Peptides)")
+} else {
+  print("No significant peptides found to generate the Mechanistic Baseline heatmap.")
+}
+```
+
+```{r}
+# Extract the results for the Mechanistic Stress question
+results_mech <- topTable(fit_contrasts, coef = "Mechanistic_Stress", number = Inf, adjust.method = "BH")
+
+# 1. Stitch text labels back on for plotting
+results_mech$Protein.Group <- y.peptide$genes[rownames(results_mech), "Protein.Group"]
+results_mech$Protein.Names <- y.peptide$genes[rownames(results_mech), "Protein.Names"]
+
+# 2. Volcano Plot
+top_proteins <- head(results_mech$Protein.Group, 15)
+EnhancedVolcano(results_mech,
+                lab = results_mech$Protein.Group,
+                selectLab = top_proteins,
+                x = 'logFC',
+                y = 'adj.P.Val',
+                pCutoff = 0.05,
+                FCcutoff = 1.0,
+                pointSize = 1.5,
+                labSize = 4.0,
+                drawConnectors = TRUE,
+                widthConnectors = 0.5,
+                max.overlaps = 50,
+                title = "c-Jun KO vs Control (Under cDDP Stress)",
+                subtitle = "Peptide-level Differential Expression")
+```
+
+```{r}
+# 1. Extract results
+res_mech_stress <- topTable(fit_contrasts, coef = "Mechanistic_Stress", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns
+res_mech_stress$Genes <- y.peptide$genes[rownames(res_mech_stress), "Genes"]
+res_mech_stress$Protein.Group <- y.peptide$genes[rownames(res_mech_stress), "Protein.Group"]
+
+# 3. Grab the top 15 UNIQUE gene symbols
+top_stress <- head(unique(res_mech_stress$Genes), 15)
+
+# 4. Plot
+EnhancedVolcano(res_mech_stress,
+                lab = res_mech_stress$Genes,
+                selectLab = top_stress,
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Mechanistic Topic: c-Jun KO vs Control (Cisplatin Stress)",
+                subtitle = "Peptide-level changes under Cisplatin treatment (24h)")
+```
+
+
+```{r}
+# 1. Extract results
+res_translation <- topTable(fit_contrasts, coef = "Translational_Inhibitor", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns
+res_translation$Protein.Group <- y.peptide$genes[rownames(res_translation), "Protein.Group"]
+res_translation$Protein.Names <- y.peptide$genes[rownames(res_translation), "Protein.Names"]
+
+# 3. Plot
+top_translation <- head(res_translation$Protein.Group, 15)
+EnhancedVolcano(res_translation,
+                lab = res_translation$Protein.Group,
+                selectLab = top_translation,
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Translational Topic: JNK-IN-8 + Cisplatin vs Cisplatin Alone",
+                subtitle = "Testing if chemical inhibition phenocopies the genetic KO (24h)")
+```
+```{r}
+# 1. Extract results
+res_translation <- topTable(fit_contrasts, coef = "Translational_Inhibitor", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns
+res_translation$Genes <- y.peptide$genes[rownames(res_translation), "Genes"]
+res_translation$Protein.Group <- y.peptide$genes[rownames(res_translation), "Protein.Group"]
+
+# 3. Grab top targets
+top_translation <- head(res_translation$Genes, 35)
+
+# 4. Plot
+EnhancedVolcano(res_translation,
+                lab = res_translation$Genes,
+                selectLab = top_translation,
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Translational Topic: JNK-IN-8 + Cisplatin vs Cisplatin Alone",
+                subtitle = "Testing if chemical inhibition phenocopies the genetic KO (24h)")
+```
+
+
+```{r}
+# 1. Filter and sort
+sig_peptides_translation <- res_translation[res_translation$adj.P.Val < 0.05, ]
+sig_peptides_translation <- sig_peptides_translation[order(abs(sig_peptides_translation$logFC), decreasing = TRUE), ]
+
+if(nrow(sig_peptides_translation) > 0) {
+  top50_translation <- rownames(head(sig_peptides_translation, n = 50))
+  
+  # 2. Isolate relevant samples
+  samples_translation <- which(y.peptide$targets$Group %in% c("CTRL_JNKIN8_cDDP_24h", "CTRL_cDDP_24h"))
+  expr_matrix_translation <- y.peptide$E[top50_translation, samples_translation, drop = FALSE]
+  
+  # 3. Impute missing values
+  bg_translation <- min(expr_matrix_translation, na.rm = TRUE) - 0.5
+  expr_matrix_translation[is.na(expr_matrix_translation)] <- bg_translation
+  
+  # 4. Scale rows and plot
+  scaled_translation <- t(scale(t(expr_matrix_translation)))
+  pheatmap(scaled_translation,
+           cluster_rows = TRUE, cluster_cols = TRUE,
+           show_rownames = FALSE, show_colnames = FALSE,
+           annotation_col = y.peptide$targets[samples_translation, c("Treatment", "Timepoint")],
+           clustering_method = 'ward.D',
+           main = "Heatmap: Translational Inhibitor (Top 50 DE Peptides)")
+} else {
+  print("No significant peptides found to generate the Translational Inhibitor heatmap.")
+}
+```
+
+
+
+```{r}
+# 1. Extract results
+res_biomarker <- topTable(fit_contrasts, coef = "Biomarker_Resistance", number = Inf, adjust.method = "BH")
+
+# 2. Add back annotation columns
+res_biomarker$Protein.Group <- y.peptide$genes[rownames(res_biomarker), "Protein.Group"]
+res_biomarker$Protein.Names <- y.peptide$genes[rownames(res_biomarker), "Protein.Names"]
+
+# 3. Plot
+top_biomarker <- head(res_biomarker$Protein.Group, 15)
+EnhancedVolcano(res_biomarker,
+                lab = res_biomarker$Protein.Group,
+                selectLab = top_biomarker,
+                x = 'logFC', y = 'adj.P.Val',
+                pCutoff = 0.05, FCcutoff = 1.0,
+                pointSize = 1.5, labSize = 4.0,
+                drawConnectors = TRUE, widthConnectors = 0.5, max.overlaps = 50,
+                title = "Biomarker Topic: Control Cells Under Cisplatin Stress vs Baseline",
+                subtitle = "Identifying the baseline chemoresistant response pipeline (24h)")
+```
+```{r}
+# 1. Filter and sort
+sig_peptides_biomarker <- res_biomarker[res_biomarker$adj.P.Val < 0.05, ]
+sig_peptides_biomarker <- sig_peptides_biomarker[order(abs(sig_peptides_biomarker$logFC), decreasing = TRUE), ]
+
+if(nrow(sig_peptides_biomarker) > 0) {
+  top50_biomarker <- rownames(head(sig_peptides_biomarker, n = 50))
+  
+  # 2. Isolate relevant samples
+  samples_biomarker <- which(y.peptide$targets$Group %in% c("CTRL_cDDP_24h", "CTRL_Untreated_0h"))
+  expr_matrix_biomarker <- y.peptide$E[top50_biomarker, samples_biomarker, drop = FALSE]
+  
+  # 3. Impute missing values
+  bg_biomarker <- min(expr_matrix_biomarker, na.rm = TRUE) - 0.5
+  expr_matrix_biomarker[is.na(expr_matrix_biomarker)] <- bg_biomarker
+  
+  # 4. Scale rows and plot
+  scaled_biomarker <- t(scale(t(expr_matrix_biomarker)))
+  pheatmap(scaled_biomarker,
+           cluster_rows = TRUE, cluster_cols = TRUE,
+           show_rownames = FALSE, show_colnames = FALSE,
+           annotation_col = y.peptide$targets[samples_biomarker, c("Treatment", "Timepoint")],
+           clustering_method = 'ward.D',
+           main = "Heatmap: Biomarker Discovery (Top 50 DE Peptides)")
+} else {
+  print("No significant peptides found to generate the Biomarker Resistance heatmap.")
+}
+```
+
+
+
+```{r}
+# 1. Filter for significance and deduplicate to unique proteins
+sig_proteins_unique <- results_mech %>% 
+  filter(adj.P.Val < 0.05) %>% 
+  distinct(Protein.Group, .keep_all = TRUE)
+
+print(paste("Analyzing", nrow(sig_proteins_unique), "unique significant proteins!"))
+
+# 2. Convert IDs for clusterProfiler
+converted <- bitr(sig_proteins_unique$Protein.Group, 
+                  fromType = "UNIPROT", 
+                  toType = "ENTREZID", 
+                  OrgDb = org.Hs.eg.db)
+
+# 3. Gene Ontology (GO) Enrichment
+ego <- enrichGO(gene = converted$ENTREZID,
+                OrgDb = org.Hs.eg.db,
+                ont = "ALL", 
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                readable = TRUE)
+
+dotplot(ego, showCategory = 10, title = "GO Enrichment: Mechanistic Stress")
+
+# 4. KEGG Pathway Enrichment
+ekegg <- enrichKEGG(gene = converted$ENTREZID,
+                    organism = 'hsa',
+                    pvalueCutoff = 0.05)
+
+dotplot(ekegg, showCategory = 10, title = "KEGG Enrichment: Mechanistic Stress")
+```
+```{r}
+# 1. Filter and Deduplicate
+sig_baseline <- res_mech_baseline %>% 
+  filter(adj.P.Val < 0.05) %>% 
+  distinct(Protein.Group, .keep_all = TRUE)
+
+if(nrow(sig_baseline) > 0) {
+  # 2. Convert IDs
+  conv_baseline <- bitr(sig_baseline$Protein.Group, fromType = "UNIPROT", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  
+  # 3. GO Enrichment
+  ego_baseline <- enrichGO(gene = conv_baseline$ENTREZID, OrgDb = org.Hs.eg.db, ont = "ALL", pAdjustMethod = "BH", pvalueCutoff = 0.05, readable = TRUE)
+  print(dotplot(ego_baseline, showCategory = 10, title = "GO: Mechanistic Baseline (c-Jun KO vs CTRL at 0h)"))
+  
+  # 4. KEGG Enrichment
+  ekegg_baseline <- enrichKEGG(gene = conv_baseline$ENTREZID, organism = 'hsa', pvalueCutoff = 0.05)
+  print(dotplot(ekegg_baseline, showCategory = 10, title = "KEGG: Mechanistic Baseline (c-Jun KO vs CTRL at 0h)"))
+} else {
+  print("No significant proteins found for Mechanistic Baseline pathway enrichment.")
+}
+```
+```{r}
+# 1. Filter and Deduplicate
+sig_translation <- res_translation %>% 
+  filter(adj.P.Val < 0.05) %>% 
+  distinct(Protein.Group, .keep_all = TRUE)
+
+if(nrow(sig_translation) > 0) {
+  # 2. Convert IDs
+  conv_translation <- bitr(sig_translation$Protein.Group, fromType = "UNIPROT", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  
+  # 3. GO Enrichment
+  ego_translation <- enrichGO(gene = conv_translation$ENTREZID, OrgDb = org.Hs.eg.db, ont = "ALL", pAdjustMethod = "BH", pvalueCutoff = 0.05, readable = TRUE)
+  print(dotplot(ego_translation, showCategory = 10, title = "GO: Translational Topic (JNK-IN-8 + Cisplatin vs Cisplatin)"))
+  
+  # 4. KEGG Enrichment
+  ekegg_translation <- enrichKEGG(gene = conv_translation$ENTREZID, organism = 'hsa', pvalueCutoff = 0.05)
+  print(dotplot(ekegg_translation, showCategory = 10, title = "KEGG: Translational Topic (JNK-IN-8 + Cisplatin vs Cisplatin)"))
+} else {
+  print("No significant proteins found for Translational Inhibitor pathway enrichment.")
+}
+```
+```{r}
+# 1. Filter and Deduplicate
+sig_biomarker <- res_biomarker %>% 
+  filter(adj.P.Val < 0.05) %>% 
+  distinct(Protein.Group, .keep_all = TRUE)
+
+if(nrow(sig_biomarker) > 0) {
+  # 2. Convert IDs
+  conv_biomarker <- bitr(sig_biomarker$Protein.Group, fromType = "UNIPROT", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+  
+  # 3. GO Enrichment
+  ego_biomarker <- enrichGO(gene = conv_biomarker$ENTREZID, OrgDb = org.Hs.eg.db, ont = "ALL", pAdjustMethod = "BH", pvalueCutoff = 0.05, readable = TRUE)
+  print(dotplot(ego_biomarker, showCategory = 10, title = "GO: Biomarker Topic (CTRL Cisplatin vs CTRL Baseline)"))
+  
+  # 4. KEGG Enrichment
+  ekegg_biomarker <- enrichKEGG(gene = conv_biomarker$ENTREZID, organism = 'hsa', pvalueCutoff = 0.05)
+  print(dotplot(ekegg_biomarker, showCategory = 10, title = "KEGG: Biomarker Topic (CTRL Cisplatin vs CTRL Baseline)"))
+} else {
+  print("No significant proteins found for Biomarker Resistance pathway enrichment.")
+}
+```
+
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
