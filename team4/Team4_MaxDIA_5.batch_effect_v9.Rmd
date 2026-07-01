@@ -1,0 +1,495 @@
+---
+title: "Batch-effect analysis v9"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+---
+
+# Purpose
+
+This is step 5 of the v9 pipeline. It uses the normalized protein matrix from step 3 before group-effect removal, then compares biological experiments between Groups to evaluate batch effect.
+
+# Settings
+
+```{r settings}
+load_project_packages(c(
+  "data.table", "limma", "ggplot2", "scatterplot3d",
+  "matrixStats", "QFeatures", "SummarizedExperiment", "S4Vectors"
+))
+
+root <- basic_obj$project_root
+pth <- list(
+  batch_dir = file.path(root, "Batch_Effect_v9"),
+  batch_table = file.path(root, "Batch_Effect_v9", "tables"),
+  batch_plots = file.path(root, "Batch_Effect_v9", "plots")
+)
+
+dir.create(pth$batch_table, recursive = TRUE, showWarnings = FALSE)
+dir.create(pth$batch_plots, recursive = TRUE, showWarnings = FALSE)
+
+raw <- data.table::copy(qc_obj$raw_map_filtered)
+cond <- as.character(qc_obj$condition_order)
+
+raw[SourceBlock == "20260331", SourceBlock := "RS"]
+data.table::setnames(raw, "SourceBlock", "Groups")
+raw[, Groups := factor(as.character(Groups), levels = c("RS", "Group1", "Group2", "Group3", "Group4"))]
+raw[, Condition := factor(as.character(Condition), levels = cond)]
+
+max_na <- 2 / 3
+min_det <- 1
+adj_m <- "BH"
+alpha <- 0.05
+lfc_thr <- 1
+plot_font_size <- 16
+
+group_order <- as.character(stats::na.omit(unique(raw$Groups)))
+group_colors <- stats::setNames(
+  grDevices::hcl.colors(length(group_order), palette = "Dark 3"),
+  group_order
+)
+condition_colors <- stats::setNames(
+  c("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9", "#F0E442", "#000000")[seq_along(cond)],
+  cond
+)
+```
+
+# Functions
+
+```{r functions}
+first_value <- function(x) {
+  x[!is.na(x) & x != ""][1]
+}
+
+collapse_values <- function(x) {
+  paste(sort(unique(x[!is.na(x) & x != ""])), collapse = ";")
+}
+
+save_plot <- function(plot, name, width, height) {
+  ggplot2::ggsave(
+    file.path(pth$batch_plots, paste0(name, ".png")),
+    plot,
+    width = width,
+    height = height,
+    dpi = 300
+  )
+}
+
+summarize_to_bio <- function(mat, raw_map) {
+  bio <- unique(raw_map[, .(Groups, Condition, BioExperiment, BioRep)])
+  data.table::setorder(bio, Groups, Condition, BioRep, BioExperiment)
+
+  mat_bio <- vapply(
+    bio$BioExperiment,
+    function(x) {
+      matrixStats::rowMedians(
+        mat[, raw_map[BioExperiment == x, RawFile], drop = FALSE],
+        na.rm = TRUE
+      )
+    },
+    numeric(nrow(mat))
+  )
+
+  rownames(mat_bio) <- rownames(mat)
+  colnames(mat_bio) <- bio$BioExperiment
+  mat_bio[is.nan(mat_bio)] <- NA_real_
+
+  list(mat = mat_bio, bio = bio)
+}
+
+make_pca <- function(mat, sample_info) {
+  mat <- mat[, sample_info$BioExperiment, drop = FALSE]
+  row_median <- matrixStats::rowMedians(mat, na.rm = TRUE)
+  mat <- mat[is.finite(row_median), , drop = FALSE]
+  row_median <- row_median[is.finite(row_median)]
+
+  missing <- which(!is.finite(mat), arr.ind = TRUE)
+  mat[missing] <- row_median[missing[, 1]]
+  mat <- mat[matrixStats::rowVars(mat) > 0, , drop = FALSE]
+
+  pca <- stats::prcomp(t(mat), center = TRUE, scale. = FALSE)
+  variance <- pca$sdev^2 / sum(pca$sdev^2)
+
+  scores <- data.table::as.data.table(
+    pca$x[, 1:3, drop = FALSE],
+    keep.rownames = "BioExperiment"
+  )
+  scores <- merge(scores, sample_info, by = "BioExperiment", sort = FALSE)
+
+  attr(scores, "variance") <- variance
+  scores
+}
+```
+
+# Uncorrected Protein Matrix
+
+```{r uncorrected_protein_matrix}
+evi_ann <- data.table::copy(clean_evi[RawFile %in% raw$RawFile])
+
+evi_ann[, ProteinID := data.table::fifelse(
+  !is.na(`Leading proteins`) & `Leading proteins` != "",
+  as.character(`Leading proteins`),
+  as.character(Proteins)
+)]
+evi_ann[, PepSeq := as.character(Sequence)]
+evi_ann <- evi_ann[
+  !is.na(ProteinID) & ProteinID != "" &
+    !is.na(PepSeq) & PepSeq != ""
+]
+evi_ann[, PepID := paste(ProteinID, PepSeq, sep = "|")]
+
+pep_long <- evi_ann[, .(
+  Intensity = sum(Intensity, na.rm = TRUE)
+), by = .(PepID, RawFile)]
+
+pep_wide <- data.table::dcast(
+  pep_long,
+  PepID ~ RawFile,
+  value.var = "Intensity",
+  fill = NA_real_
+)
+
+raw_keep <- raw[RawFile %in% names(pep_wide), RawFile]
+pep_m <- as.matrix(pep_wide[, ..raw_keep])
+rownames(pep_m) <- pep_wide$PepID
+pep_m[pep_m <= 0] <- NA_real_
+
+pep_anno <- evi_ann[, .(
+  Sequence = first_value(PepSeq),
+  ProteinID = first_value(ProteinID),
+  Gene.names = collapse_values(`Gene names`),
+  Protein.names = collapse_values(`Protein names`)
+), by = PepID]
+
+pep_anno <- pep_anno[match(rownames(pep_m), PepID)]
+raw_info <- raw[match(colnames(pep_m), RawFile)]
+
+pep_se <- SummarizedExperiment::SummarizedExperiment(
+  assays = list(intensity = pep_m),
+  rowData = S4Vectors::DataFrame(
+    as.data.frame(pep_anno[, .(Sequence, ProteinID, Gene.names, Protein.names)])
+  ),
+  colData = S4Vectors::DataFrame(as.data.frame(raw_info))
+)
+rownames(pep_se) <- pep_anno$PepID
+
+pep_f <- pep_se |>
+  QFeatures::zeroIsNA() |>
+  QFeatures::filterNA(pNA = max_na)
+
+qf <- QFeatures::QFeatures(list(peptides = pep_f))
+SummarizedExperiment::colData(qf) <- SummarizedExperiment::colData(qf[["peptides"]])
+
+qf <- qf |>
+  QFeatures::logTransform(i = "peptides", name = "log_peptides") |>
+  QFeatures::normalize(
+    i = "log_peptides",
+    name = "lognorm_peptides",
+    method = "center.median"
+  ) |>
+  QFeatures::aggregateFeatures(
+    i = "lognorm_peptides",
+    name = "proteins_uncorrected",
+    fcol = "ProteinID",
+    fun = matrixStats::colMedians,
+    na.rm = TRUE
+  )
+
+prot_raw <- SummarizedExperiment::assay(qf[["proteins_uncorrected"]])
+prot_bio <- summarize_to_bio(prot_raw, raw)
+prot_m <- prot_bio$mat
+bio <- prot_bio$bio
+
+pep_f_anno <- data.table::as.data.table(
+  as.data.frame(SummarizedExperiment::rowData(qf[["lognorm_peptides"]]))
+)
+
+prot_anno <- pep_f_anno[
+  !is.na(ProteinID) & ProteinID != "",
+  .(
+    Gene.names = collapse_values(Gene.names),
+    Protein.names = collapse_values(Protein.names),
+    Peptides_used = .N
+  ),
+  by = ProteinID
+]
+```
+
+# Group Comparisons
+
+```{r group_comparisons}
+group_pairs <- utils::combn(group_order, 2, simplify = FALSE)
+group_code <- stats::setNames(paste0("G", seq_along(group_order)), group_order)
+
+cmp <- data.table::rbindlist(lapply(seq_along(group_pairs), function(i) {
+  data.table::data.table(
+    ComparisonShortID = sprintf("B%02d", i),
+    Reference = group_pairs[[i]][1],
+    Target = group_pairs[[i]][2],
+    ComparisonID = paste0(group_pairs[[i]][2], "_vs_", group_pairs[[i]][1])
+  )
+}))
+
+run_group_comparison <- function(cmp_i) {
+  reference <- cmp_i$Reference
+  target <- cmp_i$Target
+  ref_bio <- bio[as.character(Groups) == reference, BioExperiment]
+  target_bio <- bio[as.character(Groups) == target, BioExperiment]
+  sample_ids <- c(ref_bio, target_bio)
+
+  mat0 <- prot_m[, sample_ids, drop = FALSE]
+  n_ref <- rowSums(!is.na(mat0[, ref_bio, drop = FALSE]))
+  n_target <- rowSums(!is.na(mat0[, target_bio, drop = FALSE]))
+  mat <- mat0[n_ref >= min_det & n_target >= min_det, , drop = FALSE]
+
+  model_data <- bio[match(sample_ids, BioExperiment)]
+  model_data[, Code := group_code[as.character(Groups)]]
+  model_data[, ModelGroup := factor(Code, levels = group_code[c(reference, target)])]
+
+  design <- stats::model.matrix(~ 0 + ModelGroup, data = model_data)
+  colnames(design) <- levels(model_data$ModelGroup)
+  contrast <- limma::makeContrasts(
+    contrasts = paste0(group_code[[target]], " - ", group_code[[reference]]),
+    levels = design
+  )
+
+  fit <- limma::lmFit(mat, design) |>
+    limma::contrasts.fit(contrast) |>
+    limma::eBayes()
+
+  result <- data.table::as.data.table(
+    limma::topTable(fit, number = Inf, adjust.method = adj_m, sort.by = "P"),
+    keep.rownames = "ProteinID"
+  )
+
+  result <- merge(
+    result,
+    data.table::data.table(
+      ProteinID = rownames(mat),
+      N_detected_reference = n_ref[rownames(mat)],
+      N_detected_target = n_target[rownames(mat)]
+    ),
+    by = "ProteinID",
+    all.x = TRUE
+  )
+  result <- merge(result, prot_anno, by = "ProteinID", all.x = TRUE)
+  result[, `:=`(
+    ComparisonShortID = cmp_i$ComparisonShortID,
+    ComparisonID = cmp_i$ComparisonID,
+    Target = target,
+    Reference = reference,
+    Significant = adj.P.Val < alpha & abs(logFC) >= lfc_thr
+  )]
+  result[, Direction := data.table::fcase(
+    Significant & logFC > 0, "Higher_in_target",
+    Significant & logFC < 0, "Higher_in_reference",
+    default = "Not_significant"
+  )]
+
+  summary <- data.table::data.table(
+    ComparisonShortID = cmp_i$ComparisonShortID,
+    ComparisonID = cmp_i$ComparisonID,
+    Target = target,
+    Reference = reference,
+    N_reference = length(ref_bio),
+    N_target = length(target_bio),
+    Proteins_tested = nrow(result),
+    Significant_total = sum(result$Significant),
+    Higher_in_target = sum(result$Direction == "Higher_in_target"),
+    Higher_in_reference = sum(result$Direction == "Higher_in_reference")
+  )
+
+  list(
+    result = result[, .(
+      ComparisonShortID, ComparisonID, Target, Reference,
+      ProteinID, Gene.names, Protein.names,
+      logFC, P.Value, adj.P.Val, Significant, Direction,
+      N_detected_reference, N_detected_target, Peptides_used
+    )],
+    summary = summary
+  )
+}
+
+analysis <- lapply(seq_len(nrow(cmp)), function(i) run_group_comparison(cmp[i]))
+res_lst <- stats::setNames(lapply(analysis, `[[`, "result"), cmp$ComparisonShortID)
+cmp_sum <- data.table::rbindlist(lapply(analysis, `[[`, "summary"))
+res_all <- data.table::rbindlist(res_lst)
+sig <- res_all[Significant == TRUE][order(ComparisonID, adj.P.Val, -abs(logFC))]
+```
+
+# Save Tables
+
+```{r save_tables}
+data.table::fwrite(cmp_sum, file.path(pth$batch_table, "comparison_summary.csv"))
+data.table::fwrite(res_all, file.path(pth$batch_table, "all_results.csv"))
+data.table::fwrite(sig, file.path(pth$batch_table, "significant_results.csv"))
+```
+
+# Protein-Level PCA
+
+```{r protein_pca}
+prot_pca <- make_pca(prot_m, bio)
+prot_var <- attr(prot_pca, "variance")
+
+p_pca_2d <- ggplot2::ggplot(
+  prot_pca,
+  ggplot2::aes(x = PC1, y = PC2, color = Groups, shape = Condition)
+) +
+  ggplot2::geom_point(size = 3.4, alpha = 0.90) +
+  ggplot2::scale_color_manual(values = group_colors, drop = FALSE) +
+  ggplot2::scale_shape_manual(values = c(16, 17, 15, 3, 7, 8, 18, 4)[seq_along(cond)], drop = FALSE) +
+  ggplot2::labs(
+    title = "Uncorrected protein-level PCA by Groups",
+    x = paste0("PC1 (", round(100 * prot_var[1], 1), "%)"),
+    y = paste0("PC2 (", round(100 * prot_var[2], 1), "%)"),
+    color = "Groups",
+    shape = "Condition"
+  ) +
+  ggplot2::theme_bw(base_size = plot_font_size) +
+  ggplot2::theme(legend.position = "right")
+
+save_plot(p_pca_2d, "uncorrected_protein_pca_2d", width = 10, height = 7)
+data.table::fwrite(prot_pca, file.path(pth$batch_table, "uncorrected_protein_pca_scores.csv"))
+p_pca_2d
+```
+
+```{r protein_pca_3d}
+grDevices::png(
+  file.path(pth$batch_plots, "uncorrected_protein_pca_3d.png"),
+  width = 2600,
+  height = 2100,
+  res = 300
+)
+
+scatterplot3d::scatterplot3d(
+  x = prot_pca$PC1,
+  y = prot_pca$PC2,
+  z = prot_pca$PC3,
+  color = group_colors[as.character(prot_pca$Groups)],
+  pch = c(16, 17, 15, 3, 7, 8, 18, 4)[as.integer(prot_pca$Condition)],
+  angle = 45,
+  grid = TRUE,
+  box = TRUE,
+  main = "Uncorrected protein-level PCA by Groups",
+  xlab = paste0("PC1 (", round(100 * prot_var[1], 1), "%)"),
+  ylab = paste0("PC2 (", round(100 * prot_var[2], 1), "%)"),
+  zlab = paste0("PC3 (", round(100 * prot_var[3], 1), "%)")
+)
+
+legend(
+  "topright",
+  legend = names(group_colors),
+  col = group_colors,
+  pch = 16,
+  bty = "n",
+  cex = 0.9
+)
+
+grDevices::dev.off()
+```
+
+# Volcano Plots
+
+```{r volcano_plots}
+plot_volcano <- function(result) {
+  result <- data.table::copy(result)
+  result[, neg_log10_adj_p := -log10(pmax(adj.P.Val, .Machine$double.xmin))]
+  result[, Call := data.table::fcase(
+    Significant & logFC > 0, paste0("Higher in ", Target),
+    Significant & logFC < 0, paste0("Higher in ", Reference),
+    default = "Not significant"
+  )]
+
+  comparison <- result$ComparisonID[1]
+  short_id <- result$ComparisonShortID[1]
+  call_levels <- c(
+    paste0("Higher in ", result$Target[1]),
+    paste0("Higher in ", result$Reference[1]),
+    "Not significant"
+  )
+  result[, Call := factor(Call, levels = call_levels)]
+
+  p <- ggplot2::ggplot(
+    result,
+    ggplot2::aes(x = logFC, y = neg_log10_adj_p, color = Call)
+  ) +
+    ggplot2::geom_point(alpha = 0.70, size = 1.4) +
+    ggplot2::geom_vline(xintercept = c(-lfc_thr, lfc_thr), linetype = "dashed", linewidth = 0.3) +
+    ggplot2::geom_hline(yintercept = -log10(alpha), linetype = "dashed", linewidth = 0.3) +
+    ggplot2::scale_color_manual(values = stats::setNames(
+      c("#D55E00", "#0072B2", "#999999"),
+      call_levels
+    )) +
+    ggplot2::labs(
+      title = paste0("Volcano plot: ", comparison),
+      x = "log2 fold change",
+      y = "-log10 adjusted p value",
+      color = "Call"
+    ) +
+    ggplot2::theme_bw(base_size = plot_font_size)
+
+  save_plot(p, paste0("volcano_", short_id), width = 12, height = 10)
+}
+
+invisible(lapply(res_lst, plot_volcano))
+```
+
+# Significant-Protein Summary
+
+```{r significant_summary}
+cmp_sum[, ComparisonLabel := factor(
+  paste0(ComparisonShortID, ": ", ComparisonID),
+  levels = paste0(ComparisonShortID, ": ", ComparisonID)
+)]
+
+p_sig <- ggplot2::ggplot(
+  cmp_sum,
+  ggplot2::aes(x = ComparisonLabel, y = Significant_total)
+) +
+  ggplot2::geom_col(width = 0.75, fill = "#0072B2") +
+  ggplot2::labs(
+    title = "Significant proteins by Groups comparison",
+    x = "Groups comparison",
+    y = "Significant proteins"
+  ) +
+  ggplot2::theme_bw(base_size = plot_font_size) +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 60, hjust = 1, vjust = 1))
+
+save_plot(p_sig, "significant_proteins", width = 14, height = 8)
+p_sig
+```
+
+# Batch Object
+
+```{r batch_object}
+batch_obj <- list(
+  comparison_summary = cmp_sum,
+  all_results_list = res_lst,
+  all_results = res_all,
+  sig_results = sig,
+  protein_bio_mat_uncorrected = prot_m,
+  bio_info = bio,
+  protein_pca = prot_pca,
+  settings = list(
+    padj_method = adj_m,
+    alpha = alpha,
+    fc_cutoff = lfc_thr,
+    min_detected = min_det,
+    batch_variable = "Groups",
+    batch_correction_applied = FALSE
+  )
+)
+
+cmp_sum[, .(
+  ComparisonShortID,
+  ComparisonID,
+  N_reference,
+  N_target,
+  Proteins_tested,
+  Significant_total,
+  Higher_in_target,
+  Higher_in_reference
+)]
+```

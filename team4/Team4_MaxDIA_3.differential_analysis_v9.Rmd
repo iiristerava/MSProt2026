@@ -1,0 +1,399 @@
+---
+title: "Differential analysis v9: batch-corrected protein-level limma workflow"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+---
+
+# Purpose
+
+This is step 3 of the v9 pipeline. It uses the cleaned evidence from `1.Basic_Info_v9.Rmd` and the filtered technical-replicate design from `2.QC_v9.Rmd`, then performs peptide normalization, protein aggregation, group correction, and protein-level differential analysis.
+
+# Settings
+
+```{r settings}
+load_project_packages(c(
+  "data.table", "limma", "QFeatures", "SummarizedExperiment",
+  "S4Vectors", "matrixStats"
+))
+
+root <- basic_obj$project_root
+pth <- list(
+  da_dir = file.path(root, "Differential_Analysis_v9"),
+  da_table = file.path(root, "Differential_Analysis_v9", "tables"),
+  da_plots = file.path(root, "Differential_Analysis_v9", "plots")
+)
+
+dir.create(pth$da_table, recursive = TRUE, showWarnings = FALSE)
+dir.create(pth$da_plots, recursive = TRUE, showWarnings = FALSE)
+
+raw0 <- data.table::copy(qc_obj$raw_map_original)
+raw <- data.table::copy(qc_obj$raw_map_filtered)
+cond <- as.character(qc_obj$condition_order)
+tech_out <- data.table::copy(qc_obj$technical_outlier_report)
+rm_tech <- data.table::copy(qc_obj$removed_technical_replicates)
+
+raw0[SourceBlock == "20260331", SourceBlock := "RS"]
+raw[SourceBlock == "20260331", SourceBlock := "RS"]
+data.table::setnames(raw0, "SourceBlock", "Groups")
+data.table::setnames(raw, "SourceBlock", "Groups")
+
+attr(raw0, "condition_order") <- cond
+attr(raw, "condition_order") <- cond
+
+max_na <- 2 / 3
+min_det <- 1
+adj_m <- "BH"
+alpha <- 0.05
+lfc_thr <- 1
+```
+
+# Analysis functions
+
+```{r analysis_functions}
+first_value <- function(x) {
+  x[!is.na(x) & x != ""][1]
+}
+
+collapse_values <- function(x) {
+  paste(sort(unique(x[!is.na(x) & x != ""])), collapse = ";")
+}
+
+summarize_to_bio <- function(mat, raw_map) {
+  bio_info <- unique(raw_map[, .(
+    Groups,
+    Condition,
+    BioExperiment,
+    BioRep
+  )])
+  data.table::setorder(bio_info, Condition, BioRep, BioExperiment)
+
+  mat_bio <- vapply(
+    bio_info$BioExperiment,
+    function(bio_id) {
+      matrixStats::rowMedians(
+        mat[, raw_map[BioExperiment == bio_id, RawFile], drop = FALSE],
+        na.rm = TRUE
+      )
+    },
+    numeric(nrow(mat))
+  )
+
+  rownames(mat_bio) <- rownames(mat)
+  colnames(mat_bio) <- bio_info$BioExperiment
+  mat_bio[is.nan(mat_bio)] <- NA_real_
+
+  list(mat = mat_bio, bio = bio_info)
+}
+```
+
+# Comparisons
+
+```{r comparisons}
+cmp <- data.table::data.table(
+  Target = c(
+    "c-jun_KO",
+    "CTRL_cDDP_06h", "CTRL_cDDP_24h",
+    "c-jun_KO_cDDP_06h", "c-jun_KO_cDDP_24h",
+    "c-jun_KO_cDDP_06h", "c-jun_KO_cDDP_24h",
+    "CTRL_JNK-IN-8_cDDP_06h", "CTRL_JNK-IN-8_cDDP_24h",
+    "CTRL_JNK-IN-8_cDDP_06h", "CTRL_JNK-IN-8_cDDP_24h",
+    "CTRL_cDDP_24h", "c-jun_KO_cDDP_24h", "CTRL_JNK-IN-8_cDDP_24h"
+  ),
+  Reference = c(
+    "CTRL",
+    "CTRL", "CTRL",
+    "c-jun_KO", "c-jun_KO",
+    "CTRL_cDDP_06h", "CTRL_cDDP_24h",
+    "CTRL_cDDP_06h", "CTRL_cDDP_24h",
+    "c-jun_KO_cDDP_06h", "c-jun_KO_cDDP_24h",
+    "CTRL_cDDP_06h", "c-jun_KO_cDDP_06h", "CTRL_JNK-IN-8_cDDP_06h"
+  )
+)
+
+cmp[, ComparisonShortID := sprintf("C%02d", .I)]
+cmp[, ComparisonID := paste0(Target, "_vs_", Reference)]
+cmp[, Exploratory := .I >= 12]
+```
+
+# Peptide matrix
+
+```{r peptide_matrix}
+evi_ann <- data.table::copy(clean_evi[RawFile %in% raw$RawFile])
+
+evi_ann[, ProteinID := data.table::fifelse(
+  !is.na(`Leading proteins`) & `Leading proteins` != "",
+  as.character(`Leading proteins`),
+  as.character(Proteins)
+)]
+evi_ann[, PepSeq := as.character(Sequence)]
+evi_ann <- evi_ann[
+  !is.na(ProteinID) & ProteinID != "" &
+    !is.na(PepSeq) & PepSeq != ""
+]
+evi_ann[, PepID := paste(ProteinID, PepSeq, sep = "|")]
+
+pep_long <- evi_ann[, .(
+  Intensity = sum(Intensity, na.rm = TRUE)
+), by = .(PepID, RawFile)]
+
+pep_wide <- data.table::dcast(
+  pep_long,
+  PepID ~ RawFile,
+  value.var = "Intensity",
+  fill = NA_real_
+)
+
+raw_keep <- raw[RawFile %in% names(pep_wide), RawFile]
+pep_m <- as.matrix(pep_wide[, ..raw_keep])
+rownames(pep_m) <- pep_wide$PepID
+pep_m[pep_m <= 0] <- NA_real_
+```
+
+# Peptide annotation
+
+```{r peptide_annotation}
+pep_anno <- evi_ann[, .(
+  Sequence = first_value(PepSeq),
+  ProteinID = first_value(ProteinID),
+  Proteins = collapse_values(Proteins),
+  Gene.names = collapse_values(`Gene names`),
+  Protein.names = collapse_values(`Protein names`)
+), by = PepID]
+
+pep_anno <- pep_anno[match(rownames(pep_m), PepID)]
+raw_info <- raw[match(colnames(pep_m), RawFile)]
+
+pep_se <- SummarizedExperiment::SummarizedExperiment(
+  assays = list(intensity = pep_m),
+  rowData = S4Vectors::DataFrame(
+    as.data.frame(pep_anno[, .(
+      Sequence, ProteinID, Proteins, Gene.names, Protein.names
+    )])
+  ),
+  colData = S4Vectors::DataFrame(as.data.frame(raw_info))
+)
+rownames(pep_se) <- pep_anno$PepID
+```
+
+# Normalize and aggregate
+
+```{r normalize_and_aggregate}
+pep_f <- pep_se |>
+  QFeatures::zeroIsNA() |>
+  QFeatures::filterNA(pNA = max_na)
+
+qf <- QFeatures::QFeatures(list(peptides = pep_f))
+SummarizedExperiment::colData(qf) <- SummarizedExperiment::colData(qf[["peptides"]])
+
+qf <- qf |>
+  QFeatures::logTransform(i = "peptides", name = "log_peptides") |>
+  QFeatures::normalize(
+    i = "log_peptides",
+    name = "lognorm_peptides",
+    method = "center.median"
+  ) |>
+  QFeatures::aggregateFeatures(
+    i = "lognorm_peptides",
+    name = "proteins_raw",
+    fcol = "ProteinID",
+    fun = matrixStats::colMedians,
+    na.rm = TRUE
+  )
+
+pep_raw <- SummarizedExperiment::assay(qf[["lognorm_peptides"]])
+prot_raw <- SummarizedExperiment::assay(qf[["proteins_raw"]])
+
+pep_bio <- summarize_to_bio(pep_raw, raw)
+prot_bio <- summarize_to_bio(prot_raw, raw)
+
+pep_bio_m <- pep_bio$mat
+p_bio_m <- prot_bio$mat
+bio <- prot_bio$bio
+```
+
+# Correct group effects
+
+```{r group_correction}
+condition_design <- stats::model.matrix(~ 0 + Condition, data = bio)
+
+pep_bio_m <- limma::removeBatchEffect(
+  pep_bio_m,
+  batch = factor(bio$Groups),
+  design = condition_design
+)
+
+p_bio_m <- limma::removeBatchEffect(
+  p_bio_m,
+  batch = factor(bio$Groups),
+  design = condition_design
+)
+```
+
+# Protein annotation
+
+```{r protein_annotation}
+pep_f_anno <- data.table::as.data.table(
+  as.data.frame(SummarizedExperiment::rowData(qf[["lognorm_peptides"]]))
+)
+
+prot_anno <- pep_f_anno[
+  !is.na(ProteinID) & ProteinID != "",
+  .(
+    Gene.names = collapse_values(Gene.names),
+    Protein.names = collapse_values(Protein.names),
+    Peptides_used = .N
+  ),
+  by = ProteinID
+]
+```
+
+# Differential analysis
+
+```{r differential_analysis}
+condition_code <- stats::setNames(paste0("G", seq_along(cond)), cond)
+
+run_comparison <- function(cmp_i) {
+  target <- cmp_i$Target
+  reference <- cmp_i$Reference
+  ref_bio <- bio[as.character(Condition) == reference, BioExperiment]
+  target_bio <- bio[as.character(Condition) == target, BioExperiment]
+  sample_ids <- c(ref_bio, target_bio)
+
+  mat0 <- p_bio_m[, sample_ids, drop = FALSE]
+  n_ref <- rowSums(!is.na(mat0[, ref_bio, drop = FALSE]))
+  n_target <- rowSums(!is.na(mat0[, target_bio, drop = FALSE]))
+  keep <- n_ref >= min_det & n_target >= min_det
+  mat <- mat0[keep, , drop = FALSE]
+
+  model_data <- bio[match(sample_ids, BioExperiment)]
+  model_data[, Code := condition_code[as.character(Condition)]]
+  model_data[, ModelGroup := factor(
+    Code,
+    levels = condition_code[c(reference, target)]
+  )]
+
+  design <- stats::model.matrix(~ 0 + ModelGroup, data = model_data)
+  colnames(design) <- levels(model_data$ModelGroup)
+  contrast <- limma::makeContrasts(
+    contrasts = paste0(condition_code[[target]], " - ", condition_code[[reference]]),
+    levels = design
+  )
+
+  fit <- limma::lmFit(mat, design) |>
+    limma::contrasts.fit(contrast) |>
+    limma::eBayes()
+
+  result <- data.table::as.data.table(
+    limma::topTable(
+      fit,
+      number = Inf,
+      adjust.method = adj_m,
+      sort.by = "P"
+    ),
+    keep.rownames = "ProteinID"
+  )
+
+  detection <- data.table::data.table(
+    ProteinID = rownames(mat),
+    N_detected_reference = n_ref[keep],
+    N_detected_target = n_target[keep]
+  )
+
+  result <- merge(result, detection, by = "ProteinID", all.x = TRUE)
+  result <- merge(result, prot_anno, by = "ProteinID", all.x = TRUE)
+  result[, `:=`(
+    ComparisonShortID = cmp_i$ComparisonShortID,
+    ComparisonID = cmp_i$ComparisonID,
+    Target = target,
+    Reference = reference,
+    Significant = adj.P.Val < alpha & abs(logFC) >= lfc_thr
+  )]
+  result[, Direction := data.table::fcase(
+    Significant & logFC > 0, "Higher_in_target",
+    Significant & logFC < 0, "Higher_in_reference",
+    default = "Not_significant"
+  )]
+
+  result <- result[, .(
+    ComparisonShortID,
+    ComparisonID,
+    Target,
+    Reference,
+    ProteinID,
+    Gene.names,
+    Protein.names,
+    logFC,
+    P.Value,
+    adj.P.Val,
+    Significant,
+    Direction,
+    N_detected_reference,
+    N_detected_target,
+    Peptides_used
+  )]
+
+  summary <- data.table::data.table(
+    ComparisonShortID = cmp_i$ComparisonShortID,
+    ComparisonID = cmp_i$ComparisonID,
+    Target = target,
+    Reference = reference,
+    Exploratory = cmp_i$Exploratory,
+    N_reference = length(ref_bio),
+    N_target = length(target_bio),
+    Proteins_tested = nrow(result),
+    Significant_total = sum(result$Significant),
+    Higher_in_target = sum(result$Direction == "Higher_in_target"),
+    Higher_in_reference = sum(result$Direction == "Higher_in_reference")
+  )
+
+  list(result = result, summary = summary)
+}
+```
+
+# Run comparisons
+
+```{r run_comparisons}
+analysis <- lapply(seq_len(nrow(cmp)), function(i) run_comparison(cmp[i]))
+
+res_lst <- stats::setNames(
+  lapply(analysis, `[[`, "result"),
+  cmp$ComparisonShortID
+)
+
+cmp_sum <- data.table::rbindlist(lapply(analysis, `[[`, "summary"))
+res_all <- data.table::rbindlist(res_lst)
+sig <- res_all[Significant == TRUE][order(ComparisonID, adj.P.Val, -abs(logFC))]
+```
+
+# Save results
+
+```{r save_results}
+data.table::fwrite(cmp_sum, file.path(pth$da_table, "comparison_summary.csv"))
+data.table::fwrite(res_all, file.path(pth$da_table, "all_results.csv"))
+data.table::fwrite(sig, file.path(pth$da_table, "significant_results.csv"))
+
+obj <- list(
+  comparison_summary = cmp_sum,
+  all_results_list = res_lst,
+  all_results = res_all,
+  sig_results = sig,
+  peptide_bio_mat = pep_bio_m,
+  protein_bio_mat = p_bio_m,
+  bio_info = bio,
+  design_all = raw0,
+  design_keep = raw,
+  prot_annot = prot_anno,
+  condition_order = cond,
+  settings = list(
+    padj_method = adj_m,
+    alpha = alpha,
+    fc_cutoff = lfc_thr,
+    min_detected = min_det,
+    batch_variable = "Groups"
+  )
+)
+```

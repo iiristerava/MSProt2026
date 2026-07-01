@@ -1,0 +1,299 @@
+---
+title: "Plotting v9: differential-analysis plots"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+date: "`r format(Sys.time(), '%Y-%m-%d %H:%M:%S')`"
+---
+
+# Purpose
+
+This is step 4 of the v9 pipeline. It uses the differential-analysis object created by `3.differential_analysis_v9.Rmd` to generate volcano plots, a significant-protein summary, a heatmap, and protein-level PCA.
+
+# Settings
+
+```{r settings}
+load_project_packages(c("data.table", "ggplot2", "matrixStats", "pheatmap"))
+
+cmp_sum <- data.table::copy(obj$comparison_summary)
+res_lst <- obj$all_results_list
+sig <- data.table::copy(obj$sig_results)
+prot_m <- obj$protein_bio_mat
+bio <- data.table::copy(obj$bio_info)
+cond <- as.character(obj$condition_order)
+
+alpha <- obj$settings$alpha
+lfc_thr <- obj$settings$fc_cutoff
+plot_font_size <- 16
+
+condition_colors <- stats::setNames(
+  c(
+    "#0072B2", "#D55E00", "#009E73", "#CC79A7",
+    "#E69F00", "#56B4E9", "#F0E442", "#000000"
+  )[seq_along(cond)],
+  cond
+)
+```
+
+# Plot functions
+
+```{r plot_functions}
+save_plot <- function(plot, name, width, height) {
+  ggplot2::ggsave(
+    file.path(pth$da_plots, paste0(name, ".png")),
+    plot,
+    width = width,
+    height = height,
+    dpi = 300
+  )
+}
+
+make_pca <- function(mat, sample_info) {
+  sample_ids <- sample_info$BioExperiment
+  mat <- mat[, sample_ids, drop = FALSE]
+
+  row_median <- matrixStats::rowMedians(mat, na.rm = TRUE)
+  keep <- is.finite(row_median)
+  mat <- mat[keep, , drop = FALSE]
+  row_median <- row_median[keep]
+
+  missing <- which(!is.finite(mat), arr.ind = TRUE)
+  mat[missing] <- row_median[missing[, 1]]
+  mat <- mat[matrixStats::rowVars(mat) > 0, , drop = FALSE]
+
+  pca <- stats::prcomp(t(mat), center = TRUE, scale. = FALSE)
+  variance <- pca$sdev^2 / sum(pca$sdev^2)
+
+  scores <- data.table::as.data.table(
+    pca$x[, 1:3, drop = FALSE],
+    keep.rownames = "BioExperiment"
+  )
+  scores <- merge(scores, sample_info, by = "BioExperiment", sort = FALSE)
+
+  attr(scores, "variance") <- variance
+  attr(scores, "features_used") <- nrow(mat)
+  scores
+}
+```
+
+# Volcano plots
+
+```{r volcano_plots}
+plot_volcano <- function(result) {
+  result <- data.table::copy(result)
+  result[, neg_log10_adj_p := -log10(pmax(adj.P.Val, .Machine$double.xmin))]
+  result[, Call := data.table::fcase(
+    Significant & logFC > 0, "Higher in target",
+    Significant & logFC < 0, "Higher in reference",
+    default = "Not significant"
+  )]
+  result[, Call := factor(
+    Call,
+    levels = c("Higher in target", "Higher in reference", "Not significant")
+  )]
+
+  comparison <- result$ComparisonID[1]
+  short_id <- result$ComparisonShortID[1]
+
+  p <- ggplot2::ggplot(
+    result,
+    ggplot2::aes(x = logFC, y = neg_log10_adj_p, color = Call)
+  ) +
+    ggplot2::geom_point(alpha = 0.70, size = 1.4) +
+    ggplot2::geom_vline(
+      xintercept = c(-lfc_thr, lfc_thr),
+      linetype = "dashed",
+      linewidth = 0.3
+    ) +
+    ggplot2::geom_hline(
+      yintercept = -log10(alpha),
+      linetype = "dashed",
+      linewidth = 0.3
+    ) +
+    ggplot2::scale_color_manual(values = c(
+      "Higher in target" = "#D55E00",
+      "Higher in reference" = "#0072B2",
+      "Not significant" = "#999999"
+    )) +
+    ggplot2::labs(
+      title = paste0("Volcano plot: ", comparison),
+      x = "log2 fold change",
+      y = "-log10 adjusted p value",
+      color = "Call"
+    ) +
+    ggplot2::theme_bw(base_size = plot_font_size)
+
+  save_plot(p, paste0("volcano_", short_id), width = 12, height = 10)
+}
+
+invisible(lapply(res_lst, plot_volcano))
+```
+
+# Significant-protein summary
+
+```{r significant_summary}
+cmp_sum[, ComparisonLabel := factor(
+  paste0(ComparisonShortID, ": ", ComparisonID),
+  levels = paste0(ComparisonShortID, ": ", ComparisonID)
+)]
+
+p_sig <- ggplot2::ggplot(
+  cmp_sum,
+  ggplot2::aes(x = ComparisonLabel, y = Significant_total)
+) +
+  ggplot2::geom_col(width = 0.75, fill = "#0072B2") +
+  ggplot2::labs(
+    title = "Significant proteins by comparison",
+    x = "Comparison",
+    y = "Significant proteins"
+  ) +
+  ggplot2::theme_bw(base_size = plot_font_size) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(angle = 60, hjust = 1, vjust = 1)
+  )
+
+save_plot(p_sig, "significant_proteins", width = 14, height = 8)
+p_sig
+```
+
+# Significant-protein heatmap
+
+```{r significant_heatmap}
+sig_rank <- sig[, .(
+  Best_adjusted_P = min(adj.P.Val, na.rm = TRUE)
+), by = ProteinID][order(Best_adjusted_P)]
+
+selected <- intersect(head(sig_rank$ProteinID, 60), rownames(prot_m))
+heat_m <- prot_m[selected, , drop = FALSE]
+heat_m <- heat_m[rowSums(!is.na(heat_m)) >= 3, , drop = FALSE]
+
+row_median <- matrixStats::rowMedians(heat_m, na.rm = TRUE)
+missing <- which(is.na(heat_m), arr.ind = TRUE)
+heat_m[missing] <- row_median[missing[, 1]]
+heat_m <- t(scale(t(heat_m)))
+heat_m[!is.finite(heat_m)] <- 0
+
+heat_annotation <- as.data.frame(
+  bio[match(colnames(heat_m), BioExperiment), .(Condition)]
+)
+rownames(heat_annotation) <- colnames(heat_m)
+
+grDevices::png(
+  file.path(pth$da_plots, "significant_protein_heatmap.png"),
+  width = 3300,
+  height = 3000,
+  res = 300
+)
+pheatmap::pheatmap(
+  heat_m,
+  annotation_col = heat_annotation,
+  annotation_colors = list(Condition = condition_colors),
+  show_rownames = FALSE,
+  show_colnames = TRUE,
+  fontsize = 12,
+  fontsize_col = 11,
+  main = "Significant proteins across biological experiments"
+)
+grDevices::dev.off()
+```
+
+# Protein-level PCA
+
+```{r protein_pca}
+prot_pca <- make_pca(prot_m, bio)
+prot_variance <- attr(prot_pca, "variance")
+
+p_prot <- ggplot2::ggplot(
+  prot_pca,
+  ggplot2::aes(x = PC1, y = PC2, color = Condition)
+) +
+  ggplot2::geom_point(size = 3.2, alpha = 0.90) +
+  ggplot2::scale_color_manual(values = condition_colors, drop = FALSE) +
+  ggplot2::labs(
+    title = "Protein-level PCA by biological experiment",
+    x = paste0("PC1 (", round(100 * prot_variance[1], 1), "%)"),
+    y = paste0("PC2 (", round(100 * prot_variance[2], 1), "%)"),
+    color = "Condition"
+  ) +
+  ggplot2::theme_bw(base_size = plot_font_size) +
+  ggplot2::theme(legend.position = "right")
+
+save_plot(p_prot, "protein_pca_2d", width = 10, height = 7)
+data.table::fwrite(prot_pca, file.path(pth$da_table, "protein_pca_scores.csv"))
+p_prot
+```
+
+# Three-dimensional protein-level PCA
+
+```{r protein_pca_3d}
+load_project_packages("scatterplot3d")
+
+prot_pca[, Condition := factor(as.character(Condition), levels = cond)]
+point_colors <- unname(condition_colors[as.character(prot_pca$Condition)])
+
+centroids <- prot_pca[, .(
+  PC1 = mean(PC1),
+  PC2 = mean(PC2),
+  PC3 = mean(PC3)
+), by = Condition]
+
+grDevices::png(
+  file.path(pth$da_plots, "protein_pca_3d.png"),
+  width = 3300,
+  height = 2800,
+  res = 300
+)
+
+graphics::layout(matrix(c(1, 2), nrow = 2), heights = c(4.5, 1))
+graphics::par(mar = c(4.5, 4.5, 4, 3))
+
+p_3d <- scatterplot3d::scatterplot3d(
+  prot_pca$PC1,
+  prot_pca$PC2,
+  prot_pca$PC3,
+  color = point_colors,
+  pch = 16,
+  cex.symbols = 1.6,
+  angle = 55,
+  grid = TRUE,
+  box = TRUE,
+  cex.axis = 0.9,
+  cex.lab = 1.1,
+  xlab = paste0("PC1 (", round(100 * prot_variance[1], 1), "%)"),
+  ylab = paste0("PC2 (", round(100 * prot_variance[2], 1), "%)"),
+  zlab = paste0("PC3 (", round(100 * prot_variance[3], 1), "%)"),
+  main = "Protein-level PCA"
+)
+
+for (condition_i in as.character(centroids$Condition)) {
+  condition_center <- centroids[as.character(Condition) == condition_i]
+  condition_color <- unname(condition_colors[condition_i])
+
+  p_3d$points3d(
+    condition_center$PC1,
+    condition_center$PC2,
+    condition_center$PC3,
+    pch = 18,
+    cex = 2.2,
+    col = condition_color
+  )
+}
+
+graphics::par(mar = c(0, 0, 0, 0))
+graphics::plot.new()
+graphics::legend(
+  "center",
+  legend = c(cond, "Condition centroid"),
+  col = c(unname(condition_colors[cond]), "black"),
+  pch = c(rep(16, length(cond)), 18),
+  title = "Condition",
+  bty = "n",
+  ncol = 3,
+  cex = 0.9,
+  pt.cex = c(rep(1.2, length(cond)), 1.6)
+)
+
+grDevices::dev.off()
+```
