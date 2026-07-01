@@ -36,7 +36,7 @@ Each team member should take responsibility for one or more of the following tas
 
 ## Contents of this folder
 
-- `SDRF.tsv`  
+- `Team2_DIA-NN_SDRF.sdrf.tsv`  
   Sample and Data Relationship Format file describing the experimental design
 
 - `identification/`  
